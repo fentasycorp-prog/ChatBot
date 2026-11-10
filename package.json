@@ -1,0 +1,16 @@
+{
+  "name": "ai-video-studio",
+  "version": "0.1.0",
+  "description": "Видеостудия, которой управляет ИИ-агент: MCP-сервер + веб-редактор с таймлайном, рендер через ffmpeg",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "mcp": "node src/mcp.js",
+    "test": "node test/smoke.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  }
+}
