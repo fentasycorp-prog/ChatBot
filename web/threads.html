@@ -5,150 +5,259 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Парсер Threads</title>
 <style>
-  :root { --bg:#0f1114; --panel:#171a1f; --panel2:#1e2228; --line:#2a2f37; --text:#e8eaed; --dim:#8b93a1; --accent:#7c9cff; --ok:#4cc38a; --bad:#ef6a6a; --warn:#e5b454; }
-  * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  header { display:flex; align-items:center; gap:14px; padding:12px 18px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; flex-wrap:wrap; }
-  h1 { font-size:16px; margin:0; font-weight:600; }
-  h2 { font-size:12px; margin:0 0 10px; color:var(--dim); font-weight:600; text-transform:uppercase; letter-spacing:.06em; }
-  button { font:inherit; color:var(--text); background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:7px 12px; cursor:pointer; }
-  button:hover { border-color:#3b424d; }
-  button:disabled { opacity:.5; cursor:default; }
-  button.primary { background:var(--accent); border-color:var(--accent); color:#0b1020; font-weight:600; }
+  :root { --bg:#f6f6f4; --card:#ffffff; --soft:#f0f0ec; --line:#e4e3de; --text:#1b1c1f; --dim:#6f727a; --accent:#4b5bdc; --accent-ink:#ffffff; --accent-soft:#eceefd;
+    --ok:#1f8a5b; --ok-soft:#e3f4ec; --bad:#c7403d; --warn:#9a6a00; --warn-soft:#fbf1d9; --shadow:0 1px 2px rgba(20,20,30,.05); }
+  @media (prefers-color-scheme: dark) { :root { --bg:#111214; --card:#191b1f; --soft:#202328; --line:#2a2d34; --text:#eceded; --dim:#9195a0; --accent:#8b98ff; --accent-ink:#0f1230; --accent-soft:#22264a;
+    --ok:#56c794; --ok-soft:#173528; --bad:#f07f7b; --warn:#e3b55a; --warn-soft:#3a2f14; --shadow:none; } }
+  * { box-sizing:border-box; }
+  [hidden] { display:none !important; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color:inherit; }
+  h1 { font-size:22px; margin:0; font-weight:650; letter-spacing:-.01em; }
+  h2 { font-size:16px; margin:0 0 4px; font-weight:650; }
+  p { margin:0; }
+  .dim { color:var(--dim); }
+  .small { font-size:13px; }
+  button { font:inherit; font-weight:550; color:var(--text); background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 14px; cursor:pointer; }
+  button:hover { border-color:var(--dim); }
+  button:disabled { opacity:.45; cursor:default; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+  button.ghost { border-color:transparent; background:none; color:var(--dim); padding:6px 10px; }
+  button.ghost:hover { color:var(--text); background:var(--soft); }
   button.danger { color:var(--bad); }
-  button.small { padding:4px 9px; font-size:13px; }
-  input, select, textarea { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:7px 9px; width:100%; }
-  textarea { resize:vertical; min-height:62px; }
-  label { display:block; font-size:12px; color:var(--dim); margin:9px 0 3px; }
-  .layout { display:grid; grid-template-columns:330px minmax(0,1fr); gap:16px; padding:16px 18px; align-items:start; }
-  @media (max-width: 900px) { .layout { grid-template-columns:1fr; } }
-  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
-  .row { display:flex; gap:8px; align-items:center; }
-  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
-  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
-  .chip { background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:3px 4px 3px 10px; display:inline-flex; align-items:center; gap:4px; }
-  .chip button { border:0; background:none; padding:0 6px; color:var(--dim); }
-  .status { color:var(--dim); font-size:13px; flex:1; min-width:180px; }
-  .bar { height:4px; background:var(--panel2); border-radius:4px; overflow:hidden; margin-top:5px; max-width:420px; }
+  input, select, textarea { font:inherit; color:var(--text); background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px 11px; width:100%; }
+  textarea { resize:vertical; min-height:96px; }
+  label { display:block; font-size:13px; color:var(--dim); margin:12px 0 4px; }
+  label.check { display:flex; gap:9px; align-items:center; color:var(--text); font-size:14px; }
+  label.check input { width:auto; }
+
+  .app { display:grid; grid-template-columns:220px minmax(0,1fr); min-height:100vh; }
+  nav { padding:22px 12px; border-right:1px solid var(--line); position:sticky; top:0; height:100vh; display:flex; flex-direction:column; gap:2px; }
+  nav .brand { font-weight:700; padding:0 12px 16px; font-size:16px; }
+  nav button { display:flex; justify-content:space-between; align-items:center; width:100%; border:0; background:none; text-align:left; padding:9px 12px; font-weight:500; color:var(--dim); }
+  nav button:hover { background:var(--soft); color:var(--text); }
+  nav button.on { background:var(--accent-soft); color:var(--accent); font-weight:600; }
+  nav button i { font-style:normal; font-size:12px; font-weight:600; opacity:.8; }
+  nav .grow { flex:1; }
+  main { padding:28px 32px 60px; max-width:1040px; width:100%; }
+  .head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:20px; }
+  .head .sp { flex:1; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:20px; box-shadow:var(--shadow); }
+  .stack > * + * { margin-top:14px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 14px; }
+
+  .now { display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--line); flex:none; }
+  .dot.live { background:var(--ok); box-shadow:0 0 0 4px var(--ok-soft); }
+  .bar { height:5px; background:var(--soft); border-radius:5px; overflow:hidden; margin-top:10px; }
   .bar i { display:block; height:100%; width:0; background:var(--accent); transition:width .3s; }
-  .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
-  .tabs button.on { border-color:var(--accent); color:var(--accent); }
-  .tabs .sp { flex:1; }
-  .tabs select { width:auto; flex:none; }
-  .card { display:grid; grid-template-columns:56px minmax(0,1fr) auto; gap:12px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px; }
-  .ava { width:56px; height:56px; border-radius:50%; background:var(--panel2); object-fit:cover; display:grid; place-items:center; color:var(--dim); font-weight:600; font-size:18px; }
-  .name a { color:var(--text); font-weight:600; text-decoration:none; }
-  .name a:hover { color:var(--accent); }
-  .name span { color:var(--dim); margin-left:6px; }
-  .bio { color:var(--dim); font-size:13px; margin:3px 0 6px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:3.9em; overflow:hidden; }
-  .nums { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:13px; }
-  .nums b { font-weight:600; }
-  .nums span { color:var(--dim); }
-  .post { margin-top:7px; font-size:13px; color:var(--dim); border-left:2px solid var(--line); padding-left:8px; overflow-wrap:anywhere; }
-  .post a { color:var(--accent); text-decoration:none; }
-  .acts { display:flex; flex-direction:column; gap:6px; align-items:stretch; min-width:118px; }
-  .score { font-size:20px; font-weight:700; text-align:center; }
-  .score small { display:block; font-size:11px; color:var(--dim); font-weight:400; }
-  .tag { font-size:11px; border:1px solid var(--line); border-radius:6px; padding:1px 6px; color:var(--dim); margin-left:6px; }
-  .tag.warn { color:var(--warn); border-color:#5a4a22; }
-  #log { font:12px/1.5 ui-monospace, Menlo, Consolas, monospace; max-height:230px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+
+  .steps { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px; }
+  .step .n { font-size:12px; font-weight:650; color:var(--accent); letter-spacing:.04em; text-transform:uppercase; }
+  .step .big { font-size:34px; font-weight:700; letter-spacing:-.02em; line-height:1.15; margin:6px 0 2px; }
+  .step p { min-height:60px; }
+  .step .row { margin-top:14px; }
+  .todo { display:flex; gap:10px; align-items:center; padding:9px 0; border-top:1px solid var(--line); }
+  .todo:first-of-type { border-top:0; }
+  .todo .mark { width:20px; height:20px; border-radius:50%; border:1.5px solid var(--line); display:grid; place-items:center; font-size:12px; flex:none; }
+  .todo.done .mark { background:var(--ok-soft); border-color:transparent; color:var(--ok); }
+  .todo.done span { color:var(--dim); }
+  .todo .sp { flex:1; }
+
+  .seg { display:flex; gap:4px; background:var(--soft); padding:4px; border-radius:12px; flex-wrap:wrap; }
+  .seg button { border:0; background:none; padding:6px 12px; color:var(--dim); border-radius:9px; font-weight:500; }
+  .seg button.on { background:var(--card); color:var(--text); box-shadow:var(--shadow); font-weight:600; }
+  .person { display:grid; grid-template-columns:52px minmax(0,1fr) auto; gap:14px; align-items:start; }
+  .ava { width:52px; height:52px; border-radius:50%; background:var(--accent-soft); color:var(--accent); object-fit:cover; display:grid; place-items:center; font-weight:650; font-size:19px; }
+  .person .name { font-weight:650; text-decoration:none; }
+  .person .name:hover { color:var(--accent); }
+  .why { color:var(--dim); font-size:14px; margin-top:1px; }
+  .pill { display:inline-block; font-size:12px; font-weight:550; border-radius:999px; padding:2px 9px; background:var(--soft); color:var(--dim); margin-left:6px; vertical-align:1px; }
+  .pill.ok { background:var(--ok-soft); color:var(--ok); }
+  .pill.warn { background:var(--warn-soft); color:var(--warn); }
+  .stats { display:flex; gap:22px; flex-wrap:wrap; margin-top:12px; }
+  .stats div b { display:block; font-size:18px; font-weight:650; letter-spacing:-.01em; }
+  .stats div span { font-size:12px; color:var(--dim); }
+  .acts { display:flex; gap:6px; align-items:center; }
+  .score { width:42px; height:42px; border-radius:50%; background:var(--accent-soft); color:var(--accent); display:grid; place-items:center; font-weight:700; font-size:15px; }
+  details.more { margin-top:12px; }
+  details.more summary { cursor:pointer; color:var(--dim); font-size:13px; width:max-content; }
+  .more .body { margin-top:10px; font-size:14px; color:var(--dim); display:grid; gap:6px; overflow-wrap:anywhere; }
+  .more .body b { color:var(--text); font-weight:550; }
+
+  .item { padding:14px 0; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+  .item:first-child { border-top:0; padding-top:0; }
+  .item:last-child { padding-bottom:0; }
+  .item .meta { font-size:13px; color:var(--dim); margin-bottom:3px; }
+  .item .meta a { color:var(--text); font-weight:600; text-decoration:none; }
+  .item .meta a.open { color:var(--accent); font-weight:500; }
+  .empty { color:var(--dim); text-align:center; padding:34px 16px; }
+
+  #log { font:12.5px/1.6 ui-monospace, Menlo, Consolas, monospace; max-height:260px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--dim); }
   #log .warn { color:var(--warn); } #log .error { color:var(--bad); }
-  .empty { color:var(--dim); padding:30px 10px; text-align:center; }
-  .hint { color:var(--dim); font-size:12px; margin-top:6px; }
-  details summary { cursor:pointer; color:var(--dim); font-size:13px; }
-  .feed { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:9px 12px; margin-bottom:8px; overflow-wrap:anywhere; }
-  .feed .who { font-size:13px; color:var(--dim); } .feed .who a { color:var(--text); text-decoration:none; font-weight:600; }
-  .feed.fresh { border-color:var(--accent); }
-  .hist { font-size:12px; color:var(--dim); margin-top:8px; overflow-wrap:anywhere; }
-  #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#3a1f22; border:1px solid var(--bad); color:#ffd9d9; padding:9px 14px; border-radius:10px; display:none; max-width:90vw; z-index:9; }
+  #log:empty::before { content:'Пока пусто — здесь будет видно, что делает парсер.'; font-family:system-ui, sans-serif; }
+  #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:10px 16px; border-radius:12px; display:none; max-width:90vw; z-index:9; }
+
+  @media (max-width: 860px) {
+    .app { grid-template-columns:1fr; }
+    nav { position:static; height:auto; flex-direction:row; overflow-x:auto; border-right:0; border-bottom:1px solid var(--line); padding:10px 12px; }
+    nav .brand, nav .grow { display:none; }
+    nav button { width:auto; white-space:nowrap; gap:6px; }
+    main { padding:18px 16px 50px; }
+    .steps { grid-template-columns:1fr; }
+    .step p { min-height:0; }
+    .person { grid-template-columns:44px minmax(0,1fr); }
+    .person .acts { grid-column:1 / -1; }
+    .ava { width:44px; height:44px; }
+    .grid2 { grid-template-columns:1fr; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>Парсер Threads</h1>
-  <div class="status"><span id="status">Загрузка…</span><div class="bar"><i id="bar"></i></div></div>
-  <button id="duty" title="Следить за лентой подписок и сообщать о новых постах авторов базы">Дежурство</button>
-  <button id="watch" title="Обновить профили и комментарии авторов из базы">Обновить слежение</button>
-  <button id="run" class="primary">Парсинг</button>
-  <button id="stop" class="danger" hidden>Стоп</button>
-</header>
+<div class="app">
+  <nav id="nav">
+    <div class="brand">Парсер Threads</div>
+    <button data-page="home">Обзор</button>
+    <button data-page="authors">Авторы <i id="nAuthors"></i></button>
+    <button data-page="scouts">Ищейки <i id="nScouts"></i></button>
+    <button data-page="posts">Новые посты <i id="nPosts"></i></button>
+    <button data-page="feed">Комментинг <i id="nFeed"></i></button>
+    <button data-page="post">Постинг</button>
+    <div class="grow"></div>
+    <button data-page="settings">Настройки</button>
+  </nav>
 
-<div class="layout">
-  <div>
-    <div class="panel">
-      <h2>Референсы</h2>
-      <textarea id="seedInput" placeholder="@username или ссылки на профили, по одному в строке"></textarea>
-      <div class="row" style="margin-top:8px"><button id="seedAdd">Добавить</button><select id="seedKind" style="width:auto"><option value="seed">как референс</option><option value="scout">как ищейку</option></select></div>
-      <div class="chips" id="seeds"></div>
-      <div class="hint">От референсов парсер идёт к их комментаторам и смотрит, на кого те подписаны. Ищейки — массовые комментаторы: по их ответам видно, под чьими постами собирается ниша.</div>
-    </div>
-
-    <div class="panel">
-      <h2>Новый пост</h2>
-      <textarea id="postText" maxlength="500" placeholder="Текст поста (до 500 символов)"></textarea>
-      <label>Картинка (необязательно)</label><input id="postImage" type="file" accept="image/png,image/jpeg,image/webp">
-      <div class="row" style="margin-top:8px"><button id="postSend">Опубликовать</button><span class="hint" id="postCount"></span></div>
-      <div id="postHist"></div>
-    </div>
-
-    <div class="panel">
-      <h2>Сигналы в Telegram</h2>
-      <label>Токен бота (от @BotFather)</label><input id="tgToken" type="password" autocomplete="off">
-      <label>Chat id (куда слать)</label><input id="tgChat">
-      <div class="grid2">
-        <div><label>Проверять ленту каждые, с</label><input id="monitorEvery" type="number" min="5"></div>
-        <div><label>Сигнал о постах моложе, мин</label><input id="alertMaxAgeMin" type="number" min="1"></div>
+  <main>
+    <section data-view="home" class="stack">
+      <div class="head"><h1>Обзор</h1></div>
+      <div class="card">
+        <div class="now"><span class="dot" id="dot"></span><div style="flex:1;min-width:200px"><b id="status">Загрузка…</b><div class="dim small" id="substatus"></div></div>
+          <button id="stop" class="danger" hidden>Остановить</button></div>
+        <div class="bar" id="barWrap" hidden><i id="bar"></i></div>
       </div>
-      <div class="row" style="margin-top:10px"><button id="tgTest">Проверить</button></div>
-      <div class="hint">«Дежурство» смотрит ленту подписок профиля и сообщает о свежем посте автора из базы. Чтобы пост попадал в ленту, на автора нужно быть подписанным.</div>
-    </div>
-
-    <div class="panel">
-      <h2>AdsPower</h2>
-      <label>Профиль с выполненным входом в Threads</label>
-      <div class="row"><select id="adsProfile"></select><button id="adsLoad" title="Загрузить список профилей">⟳</button></div>
-      <details style="margin-top:10px"><summary>Подключение</summary>
-        <label>Адрес Local API</label><input id="adsUrl">
-        <label>API-ключ (если AdsPower его требует)</label><input id="adsKey" type="password" autocomplete="off">
-        <label class="row" style="color:var(--text)"><input type="checkbox" id="closeBrowser" style="width:auto"> Закрывать браузер после парсинга</label>
-      </details>
-    </div>
-
-    <div class="panel">
-      <h2>Кого считать подходящим</h2>
-      <div class="grid2">
-        <div><label>Подписчиков от</label><input id="minFollowers" type="number" min="0"></div>
-        <div><label>Постов в неделю от</label><input id="minPostsPerWeek" type="number" min="0" step="0.5"></div>
-        <div><label>Комментариев на пост от</label><input id="minAvgReplies" type="number" min="0"></div>
-        <div><label>Пересечение аудитории от</label><input id="minOverlap" type="number" min="1"></div>
-        <div><label>Лайков на пост от</label><input id="minAvgLikes" type="number" min="0"></div>
+      <div class="card" id="setup" hidden>
+        <h2>Осталось настроить</h2>
+        <div id="todos" style="margin-top:8px"></div>
       </div>
-      <label class="row" style="color:var(--text)"><input type="checkbox" id="englishOnly" style="width:auto"> Только англоязычные посты и комментаторы</label>
-      <label class="row" style="color:var(--text)"><input type="checkbox" id="autoTrack" style="width:auto"> Авторов, под которыми комментируют ищейки, сразу брать в базу слежения</label>
-      <label class="row" style="color:var(--text)"><input type="checkbox" id="requireLink" style="width:auto"> Только со ссылкой в профиле</label>
-      <details style="margin-top:10px"><summary>Объём и скорость одного запуска</summary>
+      <div class="steps">
+        <div class="card step">
+          <div class="n">Шаг 1 · Ищейки</div>
+          <div class="big" id="bigScouts">0</div>
+          <p class="dim small">Аккаунты, которые массово комментируют. По их ответам находим авторов.</p>
+          <div class="row"><button class="primary" id="btnFind">Найти авторов</button><button class="ghost" data-go="scouts">Список</button></div>
+        </div>
+        <div class="card step">
+          <div class="n">Шаг 2 · База авторов</div>
+          <div class="big" id="bigAuthors">0</div>
+          <p class="dim small" id="authorsNote">Авторы, под которыми комментируют ищейки. За ними следим.</p>
+          <div class="row"><button id="btnFollow">Подписаться</button><button class="ghost" data-go="authors">Открыть</button></div>
+        </div>
+        <div class="card step">
+          <div class="n">Шаг 3 · Дежурство</div>
+          <div class="big" id="bigDuty">Выкл</div>
+          <p class="dim small">Следит за лентой подписок и шлёт сигнал в Telegram, когда автор из базы выложил пост.</p>
+          <div class="row"><button class="primary" id="btnDuty">Включить</button><button class="ghost" data-go="posts">Посты</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="row"><h2 style="flex:1;margin:0">Журнал</h2><button class="ghost" id="btnFull" title="Референсы → их комментаторы → на кого те подписаны">Полный поиск по референсам</button></div>
+        <div id="log" style="margin-top:10px"></div>
+      </div>
+    </section>
+
+    <section data-view="authors" hidden>
+      <div class="head"><h1>Авторы</h1><span class="sp"></span>
+        <select id="sort" style="width:auto"><option value="score">По оценке</option><option value="followers">По подписчикам</option><option value="replies">По комментариям</option><option value="activity">По частоте постов</option></select>
+        <button id="csv">Скачать CSV</button></div>
+      <div class="row" style="margin-bottom:14px"><div class="seg" id="seg"></div><span style="flex:1"></span><span id="segActs" class="row"></span></div>
+      <div class="card" id="seedBox" hidden style="margin-bottom:14px">
+        <h2>Добавить референс</h2>
+        <p class="dim small">От референса парсер идёт к его комментаторам и смотрит, на кого они подписаны.</p>
+        <div class="row" style="margin-top:10px;flex-wrap:nowrap"><input id="seedInput" placeholder="@username или ссылка на профиль"><button id="seedAdd">Добавить</button></div>
+      </div>
+      <div class="stack" id="people"></div>
+    </section>
+
+    <section data-view="scouts" hidden>
+      <div class="head"><h1>Ищейки</h1></div>
+      <div class="card" style="margin-bottom:14px">
+        <h2>Добавить ищейку</h2>
+        <p class="dim small">Аккаунт, который постоянно комментирует под чужими постами. Парсер читает его вкладку «Ответы».</p>
+        <div class="row" style="margin-top:10px;flex-wrap:nowrap"><input id="scoutInput" placeholder="@username или ссылка, можно несколько через пробел"><button id="scoutAdd">Добавить</button></div>
+      </div>
+      <div class="stack" id="scoutList"></div>
+    </section>
+
+    <section data-view="posts" hidden>
+      <div class="head"><h1>Новые посты</h1><span class="dim small">посты авторов из базы, свежие сверху</span></div>
+      <div class="card" id="postFeed"></div>
+    </section>
+
+    <section data-view="feed" hidden>
+      <div class="head"><h1>Комментинг</h1><span class="dim small">кто под чьим постом оставил комментарий</span></div>
+      <div class="card" id="commentFeed"></div>
+    </section>
+
+    <section data-view="post" hidden>
+      <div class="head"><h1>Постинг</h1></div>
+      <div class="card">
+        <h2>Новый пост</h2>
+        <p class="dim small">Уйдёт от аккаунта из выбранного профиля AdsPower.</p>
+        <textarea id="postText" maxlength="500" placeholder="Текст поста" style="margin-top:12px"></textarea>
+        <label>Картинка (необязательно)</label><input id="postImage" type="file" accept="image/png,image/jpeg,image/webp">
+        <div class="row" style="margin-top:14px"><button id="postSend" class="primary">Опубликовать</button><span class="dim small" id="postCount">0 / 500</span></div>
+      </div>
+      <div class="card" style="margin-top:14px"><h2>История</h2><div id="postHist" style="margin-top:8px"></div></div>
+    </section>
+
+    <section data-view="settings" hidden class="stack">
+      <div class="head"><h1>Настройки</h1><span class="sp"></span><span class="dim small" id="saved"></span><button id="saveSettings" class="primary">Сохранить</button></div>
+      <div class="card">
+        <h2>AdsPower</h2>
+        <p class="dim small">Профиль, в котором выполнен вход в Threads. AdsPower должен быть запущен.</p>
+        <label>Профиль</label>
+        <div class="row" style="flex-wrap:nowrap"><select id="adsProfile"></select><button id="adsLoad" style="white-space:nowrap">Загрузить список</button></div>
+        <div class="grid2"><div><label>Адрес Local API</label><input id="adsUrl"></div><div><label>API-ключ (если требуется)</label><input id="adsKey" type="password" autocomplete="off"></div></div>
+        <label class="check" style="margin-top:14px"><input type="checkbox" id="closeBrowser"> Закрывать браузер после работы</label>
+      </div>
+      <div class="card">
+        <h2>Сигналы в Telegram</h2>
+        <p class="dim small">Создайте бота у @BotFather, напишите ему любое сообщение и вставьте сюда токен и свой chat id.</p>
+        <div class="grid2"><div><label>Токен бота</label><input id="tgToken" type="password" autocomplete="off"></div><div><label>Chat id</label><input id="tgChat"></div>
+          <div><label>Проверять ленту каждые, секунд</label><input id="monitorEvery" type="number" min="5"></div><div><label>Сигнал о постах моложе, минут</label><input id="alertMaxAgeMin" type="number" min="1"></div></div>
+        <div class="row" style="margin-top:14px"><button id="tgTest">Отправить тестовое сообщение</button></div>
+      </div>
+      <div class="card">
+        <h2>Кого брать в базу</h2>
         <div class="grid2">
+          <div><label>Подписчиков от</label><input id="minFollowers" type="number" min="0"></div>
+          <div><label>Постов в неделю от</label><input id="minPostsPerWeek" type="number" min="0" step="0.5"></div>
+          <div><label>Лайков на пост от</label><input id="minAvgLikes" type="number" min="0"></div>
+          <div><label>Комментариев на пост от</label><input id="minAvgReplies" type="number" min="0"></div>
+        </div>
+        <label class="check" style="margin-top:14px"><input type="checkbox" id="englishOnly"> Только англоязычные</label>
+        <label class="check"><input type="checkbox" id="requireLink"> Только со ссылкой в профиле</label>
+        <label class="check"><input type="checkbox" id="autoTrack"> Авторов от ищеек добавлять в базу без ручного одобрения</label>
+      </div>
+      <details class="card">
+        <summary style="cursor:pointer;font-weight:650">Объём и скорость</summary>
+        <div class="grid2" style="margin-top:6px">
+          <div><label>Проверить авторов за запуск</label><input id="maxCandidates" type="number" min="1"></div>
+          <div><label>Ищейка — комментариев в день от</label><input id="scoutMinPerDay" type="number" min="1"></div>
+          <div><label>Проверить комментаторов на ищейку</label><input id="scoutChecks" type="number" min="0"></div>
+          <div><label>Автообновление, каждые N часов (0 — выкл)</label><input id="autoHours" type="number" min="0"></div>
+          <div><label>Пауза между действиями от, мс</label><input id="delayMin" type="number" min="0" step="100"></div>
+          <div><label>Пауза до, мс</label><input id="delayMax" type="number" min="0" step="100"></div>
           <div><label>Постов у референса</label><input id="postsPerSeed" type="number" min="1"></div>
           <div><label>Комментаторов с поста</label><input id="commentersPerPost" type="number" min="1"></div>
           <div><label>Открыть подписок (людей)</label><input id="maxAudience" type="number" min="1"></div>
-          <div><label>Проверить кандидатов</label><input id="maxCandidates" type="number" min="1"></div>
-          <div><label>Проверить на ищейку (людей)</label><input id="scoutChecks" type="number" min="0"></div>
-          <div><label>Ищейка: комментариев в день от</label><input id="scoutMinPerDay" type="number" min="1"></div>
-          <div><label>Пауза от, мс</label><input id="delayMin" type="number" min="0" step="100"></div>
-          <div><label>Пауза до, мс</label><input id="delayMax" type="number" min="0" step="100"></div>
+          <div><label>Пересечение аудитории от</label><input id="minOverlap" type="number" min="1"></div>
         </div>
-        <label>Автообновление слежения, каждые N часов (0 — выключено)</label><input id="autoHours" type="number" min="0">
-        <label>Ключевые слова для поиска (необязательно, через запятую)</label><input id="keywords">
+        <label>Ключевые слова для поиска (через запятую)</label><input id="keywords">
       </details>
-      <div class="row" style="margin-top:12px"><button id="saveSettings">Сохранить</button><span class="hint" id="saved"></span></div>
-    </div>
-  </div>
-
-  <div>
-    <div class="tabs" id="tabs"></div>
-    <div id="list"></div>
-    <div class="panel"><h2>Журнал</h2><div id="log"></div></div>
-  </div>
+    </section>
+  </main>
 </div>
 <div id="toast"></div>
 
@@ -156,8 +265,9 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const NUM_FIELDS = ['minFollowers', 'minPostsPerWeek', 'minAvgReplies', 'minOverlap', 'postsPerSeed', 'commentersPerPost', 'maxAudience', 'maxCandidates', 'delayMin', 'delayMax', 'autoHours', 'minAvgLikes', 'scoutChecks', 'scoutMinPerDay', 'monitorEvery', 'alertMaxAgeMin'];
-const TABS = [['new', 'Найденные'], ['approved', 'База авторов'], ['posts', 'Новые посты'], ['feed', 'Комментинг'], ['scout', 'Ищейки'], ['seed', 'Референсы'], ['rejected', 'Отклонённые'], ['filtered', 'Отсеянные']];
-let S = null, tab = 'new', sort = 'score', settingsDirty = false;
+const CHECKS = ['closeBrowser', 'englishOnly', 'requireLink', 'autoTrack'];
+const SEGS = [['approved', 'В базе'], ['new', 'Ждут проверки'], ['seed', 'Референсы'], ['filtered', 'Отсеянные'], ['rejected', 'Отклонённые']];
+let S = null, page = 'home', seg = 'approved', sort = 'score', settingsDirty = false;
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = 'none'), 6000); }
 
@@ -171,119 +281,160 @@ async function api(path, data) {
 const fmt = (n) => (n == null ? '—' : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K' : String(n));
 function ago(sec) {
   if (!sec) return '—';
-  const d = Math.floor((Date.now() / 1000 - sec) / 86400);
-  return d <= 0 ? 'сегодня' : d === 1 ? 'вчера' : `${d} дн. назад`;
+  const min = Math.max(0, Math.floor((Date.now() / 1000 - sec) / 60));
+  if (min < 1) return 'только что';
+  if (min < 60) return `${min} мин назад`;
+  if (min < 1440) return `${Math.floor(min / 60)} ч назад`;
+  const d = Math.floor(min / 1440);
+  return d === 1 ? 'вчера' : `${d} дн. назад`;
 }
+const plural = (n, one, few, many) => { const a = n % 10, b = n % 100; return a === 1 && b !== 11 ? one : a >= 2 && a <= 4 && (b < 10 || b >= 20) ? few : many; };
 const bucket = (a) => (a.role === 'seed' ? 'seed' : a.role === 'scout' ? 'scout' : a.status);
+const link = (u, cls = '') => `<a class="${cls}" href="${esc(S.settings.threadsBase)}/@${encodeURIComponent(u)}" target="_blank" rel="noopener noreferrer">@${esc(u)}</a>`;
+const postLink = (u, code) => `<a class="open" href="${esc(S.settings.threadsBase)}/@${encodeURIComponent(u)}/post/${encodeURIComponent(code)}" target="_blank" rel="noopener noreferrer">открыть</a>`;
+const avatar = (a) => (a.avatar ? `<img class="ava" src="/avatar/${encodeURIComponent(a.avatar)}" alt="" loading="lazy">` : `<div class="ava">${esc(a.username[0].toUpperCase())}</div>`);
 
 function fillSettings() {
   const s = S.settings;
   for (const k of NUM_FIELDS) $(k).value = s[k];
+  for (const k of CHECKS) $(k).checked = s[k];
   $('adsUrl').value = s.adsUrl;
   $('adsKey').placeholder = s.hasKey ? 'сохранён' : '';
   $('tgToken').placeholder = s.hasTg ? 'сохранён' : '';
   $('tgChat').value = s.tgChat;
-  $('closeBrowser').checked = s.closeBrowser;
-  $('englishOnly').checked = s.englishOnly;
-  $('requireLink').checked = s.requireLink;
-  $('autoTrack').checked = s.autoTrack;
   $('keywords').value = s.keywords.join(', ');
   const sel = $('adsProfile');
   if (![...sel.options].some((o) => o.value === s.adsProfile)) {
-    sel.innerHTML = s.adsProfile ? `<option value="${esc(s.adsProfile)}">${esc(s.adsProfile)}</option>` : '<option value="">— нажмите ⟳ —</option>';
+    sel.innerHTML = s.adsProfile ? `<option value="${esc(s.adsProfile)}">${esc(s.adsProfile)}</option>` : '<option value="">— нажмите «Загрузить список» —</option>';
   }
   sel.value = s.adsProfile;
 }
 
 function readSettings() {
-  const out = { adsUrl: $('adsUrl').value, adsKey: $('adsKey').value, tgToken: $('tgToken').value, tgChat: $('tgChat').value, adsProfile: $('adsProfile').value,
-    closeBrowser: $('closeBrowser').checked, englishOnly: $('englishOnly').checked, requireLink: $('requireLink').checked, autoTrack: $('autoTrack').checked, keywords: $('keywords').value.split(',') };
+  const out = { adsUrl: $('adsUrl').value, adsKey: $('adsKey').value, tgToken: $('tgToken').value, tgChat: $('tgChat').value, adsProfile: $('adsProfile').value, keywords: $('keywords').value.split(',') };
   for (const k of NUM_FIELDS) out[k] = Number($(k).value);
+  for (const k of CHECKS) out[k] = $(k).checked;
   return out;
 }
 
-function card(a) {
+// One plain sentence: why this account is on the list.
+function why(a) {
+  if (a.filterReason) return `Не прошла фильтр: ${esc(a.filterReason)}`;
+  if (a.role === 'seed') return 'Референс — от неё ищем похожих';
+  if (a.scoutComments) return `Под её постами ${a.scoutComments} ${plural(a.scoutComments, 'комментарий', 'комментария', 'комментариев')} ищеек`;
+  if (a.overlap) return `На неё подписаны ${a.overlap} из ${S.audienceScanned} комментаторов референсов`;
+  return esc(a.via || '');
+}
+
+function person(a) {
   const m = a.metrics || {};
-  const url = `${S.settings.threadsBase}/@${encodeURIComponent(a.username)}`;
-  const ava = a.avatar
-    ? `<img class="ava" src="/avatar/${encodeURIComponent(a.avatar)}" alt="" loading="lazy">`
-    : `<div class="ava">${esc(a.username[0].toUpperCase())}</div>`;
   const top = (a.topPosts || [])[0];
-  const overlap = a.role === 'seed' || a.role === 'scout' || (!a.overlap && a.commentedBy?.length) ? '' : `<div><b>${a.overlap ?? 0}</b> <span>из ${S.audienceScanned} комментаторов подписаны</span></div>`;
-  const acts = a.role === 'scout' ? `<button class="small danger" data-act="unscout">Убрать из ищеек</button>` : a.role === 'seed'
-    ? `<button class="small danger" data-act="unseed">Убрать из референсов</button>`
-    : `${a.status !== 'approved' ? '<button class="small" data-act="approved">✓ Одобрить</button>' : ''}
-       <button class="small" data-act="seed">★ В референсы</button>
-       ${a.status !== 'rejected' ? '<button class="small danger" data-act="rejected">✕ Отклонить</button>' : '<button class="small" data-act="new">Вернуть</button>'}`;
-  return `<div class="card" data-u="${esc(a.username)}">
-    ${ava}
+  const b = bucket(a);
+  const acts = b === 'seed' ? `<button class="ghost danger" data-act="unseed">Убрать</button>`
+    : `${b !== 'approved' ? '<button data-act="approved">В базу</button>' : ''}
+       ${b === 'approved' ? '<button class="ghost" data-act="seed" title="Искать похожих на неё">Сделать референсом</button>' : ''}
+       ${b !== 'rejected' ? '<button class="ghost danger" data-act="rejected" title="Убрать и больше не предлагать">Убрать</button>' : '<button class="ghost" data-act="new">Вернуть</button>'}`;
+  const rhythm = [m.avgIntervalH != null ? `пост примерно каждые <b>${m.avgIntervalH} ч</b>` : '', m.activeHours?.length ? `обычно в <b>${m.activeHours.map((h) => String(h).padStart(2, '0') + ':00').join(', ')}</b> UTC` : ''].filter(Boolean).join(', ');
+  return `<div class="card person" data-u="${esc(a.username)}">
+    ${avatar(a)}
     <div>
-      <div class="name"><a href="${esc(url)}" target="_blank" rel="noopener noreferrer">@${esc(a.username)}</a>${a.verified ? ' ✔' : ''}<span>${esc(a.fullName)}</span>
-        ${a.dead ? '<span class="tag warn">не отвечает</span>' : ''}${a.followed ? '<span class="tag">подписаны</span>' : ''}${a.auto ? '<span class="tag">по следам ищеек</span>' : ''}${a.filterReason ? `<span class="tag warn">${esc(a.filterReason)}</span>` : ''}${a.via ? `<span class="tag">${esc(a.via)}</span>` : ''}</div>
-      <div class="bio">${esc(a.bio)}</div>
-      <div class="nums">
-        <div><b>${fmt(a.followers)}</b> <span>подписчиков</span></div>
-        <div><b>${m.postsPerWeek ?? '—'}</b> <span>постов/нед</span></div>
-        <div><b>${fmt(m.avgLikes)}</b> <span>лайков</span></div>
-        <div><b>${m.avgReplies ?? '—'}</b> <span>комментариев на пост</span></div>
-        <div><span>последний пост:</span> <b>${ago(m.lastPostAt)}</b></div>
-        ${m.avgIntervalH != null ? `<div><span>пост каждые</span> <b>${m.avgIntervalH} ч</b></div>` : ''}
-        ${m.activeHours?.length ? `<div><span>обычно постит в</span> <b>${m.activeHours.map((h) => String(h).padStart(2, '0') + ':00').join(', ')}</b> <span>UTC</span></div>` : ''}
-        ${a.scoutComments ? `<div><b>${a.scoutComments}</b> <span>комментариев ищеек под её постами</span></div>` : ''}
-        ${overlap}
+      <div>${link(a.username, 'name')}${a.verified ? ' ✔' : ''} <span class="dim">${esc(a.fullName)}</span>${a.followed ? '<span class="pill ok">подписаны</span>' : ''}${a.filterReason ? '<span class="pill warn">отсеяна</span>' : ''}</div>
+      <div class="why">${why(a)}</div>
+      <div class="stats">
+        <div><b>${fmt(a.followers)}</b><span>подписчиков</span></div>
+        <div><b>${m.postsPerWeek ?? '—'}</b><span>постов в неделю</span></div>
+        <div><b>${fmt(m.avgLikes)}</b><span>лайков на пост</span></div>
+        <div><b>${m.avgReplies ?? '—'}</b><span>комментариев</span></div>
+        <div><b>${ago(m.lastPostAt)}</b><span>последний пост</span></div>
       </div>
-      ${a.commentStats ? `<div class="nums" style="margin-top:5px"><div><span>комментинг:</span> <b>${a.commentStats.perDay}</b> <span>в день</span></div>
-        ${a.commentStats.templated != null ? `<div><b>${a.commentStats.templated}%</b> <span>повторяющихся текстов</span></div>` : ''}
-        ${a.commentStats.targets.length ? `<div><span>чаще всего у:</span> ${a.commentStats.targets.slice(0, 4).map((x) => `@${esc(x.to)} ×${x.count}`).join(', ')}</div>` : ''}</div>` : ''}
-      ${a.funnel?.length ? `<div class="hint">Воронка: ${a.funnel.map(esc).join(' → ')}${(a.links || []).length ? ' · ' + a.links.slice(0, 3).map(esc).join(' , ') : ''}</div>` : ''}
-      ${a.commentedBy?.length && !/комментируют/.test(a.via || '') ? `<div class="hint">У неё комментируют: ${a.commentedBy.map((x) => '@' + esc(x)).join(', ')}</div>` : ''}
-      ${a.sources?.length ? `<div class="hint">Аудитория от: ${a.sources.map((x) => '@' + esc(x)).join(', ')}</div>` : ''}
-      ${top ? `<div class="post">${esc(top.text.slice(0, 200)) || '(пост без текста)'} · 💬 ${fmt(top.replies)} · ♥ ${fmt(top.likes)} · <a href="${esc(url)}/post/${encodeURIComponent(top.code)}" target="_blank" rel="noopener noreferrer">открыть</a></div>` : ''}
+      <details class="more"><summary>Подробнее</summary><div class="body">
+        ${a.bio ? `<div>${esc(a.bio)}</div>` : ''}
+        ${rhythm ? `<div>Ритм: ${rhythm}</div>` : ''}
+        ${a.funnel?.length ? `<div>Куда ведёт: <b>${a.funnel.map(esc).join(', ')}</b>${(a.links || []).length ? ' — ' + a.links.slice(0, 3).map(esc).join(', ') : ''}</div>` : ''}
+        ${a.commentedBy?.length ? `<div>Кто у неё комментирует: ${a.commentedBy.map((x) => '@' + esc(x)).join(', ')}</div>` : ''}
+        ${a.commentStats?.total ? `<div>Сама комментирует: <b>${a.commentStats.perDay}</b> в день${a.commentStats.targets.length ? ', чаще всего у ' + a.commentStats.targets.slice(0, 3).map((x) => '@' + esc(x.to)).join(', ') : ''}</div>` : ''}
+        ${top ? `<div>Самый обсуждаемый пост: «${esc(top.text.slice(0, 160)) || 'без текста'}» — ${fmt(top.replies)} комментариев, ${fmt(top.likes)} лайков · ${postLink(a.username, top.code)}</div>` : ''}
+      </div></details>
     </div>
-    <div class="acts">${a.role === 'seed' || a.role === 'scout' ? '' : `<div class="score">${a.score ?? 0}<small>оценка</small></div>`}${acts}</div>
+    <div class="acts">${b === 'seed' ? '' : `<div class="score" title="Оценка 0–100">${a.score ?? 0}</div>`}${acts}</div>
   </div>`;
 }
+
+function scoutRow(a) {
+  const c = a.commentStats;
+  return `<div class="card person" data-u="${esc(a.username)}">
+    ${avatar(a)}
+    <div>
+      <div>${link(a.username, 'name')} <span class="dim">${esc(a.fullName || '')}</span>${a.dead ? '<span class="pill warn">не отвечает</span>' : ''}</div>
+      <div class="why">${c?.targets?.length ? 'Чаще всего комментирует у ' + c.targets.slice(0, 4).map((x) => '@' + esc(x.to)).join(', ') : 'Ответы ещё не читали — нажмите «Найти авторов» в обзоре'}</div>
+      ${c ? `<div class="stats">
+        <div><b>${c.perDay}</b><span>комментариев в день</span></div>
+        <div><b>${c.templated == null ? '—' : c.templated + '%'}</b><span>одинаковых текстов</span></div>
+        <div><b>${c.total}</b><span>собрано комментариев</span></div>
+      </div>` : ''}
+    </div>
+    <div class="acts"><button class="ghost danger" data-act="unscout">Убрать</button></div>
+  </div>`;
+}
+
+const feedItem = (meta, text) => `<div class="item"><div class="meta">${meta}</div><div>${esc(text) || '<span class="dim">(без текста)</span>'}</div></div>`;
 
 function render() {
   const counts = {};
   for (const a of S.accounts) counts[bucket(a)] = (counts[bucket(a)] || 0) + 1;
-  counts.feed = S.feed.length;
-  counts.posts = S.newPosts.length;
-  $('tabs').innerHTML = TABS.map(([k, t]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${t} ${counts[k] || 0}</button>`).join('')
-    + `<span class="sp"></span><select id="sort">
-        <option value="score">По оценке</option><option value="overlap">По пересечению аудитории</option>
-        <option value="replies">По комментариям</option><option value="followers">По подписчикам</option><option value="activity">По частоте постов</option>
-       </select>${tab === 'new' && counts.new ? '<button id="approveAll">Одобрить всех</button>' : ''}${tab === 'approved' || tab === 'seed' ? '<button id="followAll">Подписаться на базу</button>' : ''}<button id="csv">CSV</button>`;
+  $('nAuthors').textContent = counts.approved || ''; $('nScouts').textContent = S.scouts.length || '';
+  $('nPosts').textContent = S.newPosts.filter((p) => p.fresh).length || ''; $('nFeed').textContent = S.feed.filter((p) => p.fresh).length || '';
+  for (const b of $('nav').querySelectorAll('button')) b.classList.toggle('on', b.dataset.page === page);
+  for (const v of document.querySelectorAll('[data-view]')) v.hidden = v.dataset.view !== page;
+
+  $('bigScouts').textContent = S.scouts.length;
+  $('bigAuthors').textContent = counts.approved || 0;
+  $('authorsNote').textContent = counts.new ? `Ещё ${counts.new} ${plural(counts.new, 'ждёт', 'ждут', 'ждут')} вашей проверки.` : 'Авторы, под которыми комментируют ищейки. За ними следим.';
+  const todos = [
+    [Boolean(S.settings.adsProfile), 'Выбрать профиль AdsPower', 'settings'],
+    [S.settings.hasTg && Boolean(S.settings.tgChat), 'Подключить Telegram для сигналов', 'settings'],
+    [S.scouts.length + S.seeds.length > 0, 'Добавить первую ищейку', 'scouts'],
+  ];
+  $('setup').hidden = todos.every((t) => t[0]);
+  $('todos').innerHTML = todos.map(([done, text, to]) => `<div class="todo${done ? ' done' : ''}"><span class="mark">${done ? '✓' : ''}</span><span>${text}</span><span class="sp"></span>${done ? '' : `<button class="ghost" data-go="${to}">Открыть</button>`}</div>`).join('');
+
+  $('seg').innerHTML = SEGS.map(([k, t]) => `<button data-seg="${k}" class="${k === seg ? 'on' : ''}">${t}${counts[k] ? ' · ' + counts[k] : ''}</button>`).join('');
+  $('segActs').innerHTML = seg === 'new' && counts.new ? '<button id="approveAll">Взять всех в базу</button>' : seg === 'approved' && counts.approved ? '<button id="followAll">Подписаться на базу</button>' : '';
+  $('seedBox').hidden = seg !== 'seed';
   $('sort').value = sort;
-  const key = { score: (a) => a.score || 0, overlap: (a) => a.overlap || 0, replies: (a) => a.metrics?.avgReplies || 0,
-    followers: (a) => a.followers || 0, activity: (a) => a.metrics?.postsPerWeek || 0 }[sort];
-  const rows = S.accounts.filter((a) => bucket(a) === tab).sort((a, b) => key(b) - key(a));
-  const tb = S.settings.threadsBase;
-  if (tab === 'feed') $('list').innerHTML = S.feed.length ? S.feed.map((c) => `<div class="feed${c.fresh ? ' fresh' : ''}">
-      <div class="who"><a href="${esc(tb)}/@${encodeURIComponent(c.by)}" target="_blank" rel="noopener noreferrer">@${esc(c.by)}</a> → ${c.to ? `<a href="${esc(tb)}/@${encodeURIComponent(c.to)}" target="_blank" rel="noopener noreferrer">@${esc(c.to)}</a>` : '?'}
-        · ${c.scout ? 'ищейка · ' : ''}${ago(c.takenAt)} · ♥ ${fmt(c.likes)}${c.fresh ? ' · <b>новый</b>' : ''} · <a href="${esc(tb)}/@${encodeURIComponent(c.by)}/post/${encodeURIComponent(c.code)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-weight:400">открыть</a></div>
-      <div>${esc(c.text) || '(без текста)'}</div></div>`).join('')
-    : '<div class="empty">Здесь появятся комментарии, которые авторы из базы и референсы оставляют у других. Нажмите «Обновить слежение».</div>';
-  else if (tab === 'posts') $('list').innerHTML = S.newPosts.length ? S.newPosts.map((c) => `<div class="feed${c.fresh ? ' fresh' : ''}">
-      <div class="who"><a href="${esc(tb)}/@${encodeURIComponent(c.by)}" target="_blank" rel="noopener noreferrer">@${esc(c.by)}</a>
-        · ${ago(c.takenAt)} · 💬 ${fmt(c.replies)} · ♥ ${fmt(c.likes)}${c.fresh ? ' · <b>новый</b>' : ''} · <a href="${esc(tb)}/@${encodeURIComponent(c.by)}/post/${encodeURIComponent(c.code)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-weight:400">открыть</a></div>
-      <div>${esc(c.text) || '(без текста)'}</div></div>`).join('')
-    : '<div class="empty">Здесь появятся посты референсов и авторов из базы. Нажмите «Обновить слежение».</div>';
-  else $('list').innerHTML = rows.length ? rows.map(card).join('')
-    : `<div class="empty">${tab === 'new' ? 'Пока пусто. Добавьте референсы, выберите профиль AdsPower и нажмите «Парсинг».' : 'Здесь пока ничего нет.'}</div>`;
-  $('seeds').innerHTML = S.seeds.map((u) => `<span class="chip">@${esc(u)}<button data-rm="${esc(u)}" title="Убрать">×</button></span>`).join('');
-  $('postHist').innerHTML = (S.posts || []).slice(0, 4).map((p) => `<div class="hist">${p.ok ? '✓' : '✕'} ${new Date(p.at).toLocaleString('ru')} — ${esc(p.text.slice(0, 70))}${p.error ? ` <span style="color:var(--bad)">(${esc(p.error)})</span>` : ''}</div>`).join('');
+  const key = { score: (a) => a.score || 0, replies: (a) => a.metrics?.avgReplies || 0, followers: (a) => a.followers || 0, activity: (a) => a.metrics?.postsPerWeek || 0 }[sort];
+  const rows = S.accounts.filter((a) => bucket(a) === seg).sort((a, b) => key(b) - key(a));
+  const emptyText = { approved: 'В базе пока никого. Добавьте ищейку и нажмите «Найти авторов» в обзоре.', new: 'Никто не ждёт проверки.', seed: 'Референсов нет — они нужны только для полного поиска по аудитории.', filtered: 'Отсеянных нет.', rejected: 'Вы никого не убирали.' }[seg];
+  $('people').innerHTML = rows.length ? rows.map(person).join('') : `<div class="card empty">${emptyText}</div>`;
+
+  const sc = S.accounts.filter((a) => a.role === 'scout').sort((a, b) => (b.commentStats?.perDay || 0) - (a.commentStats?.perDay || 0));
+  $('scoutList').innerHTML = sc.length ? sc.map(scoutRow).join('') : '<div class="card empty">Ищеек пока нет. Добавьте аккаунт, который постоянно комментирует под чужими постами.</div>';
+
+  $('postFeed').innerHTML = S.newPosts.length ? S.newPosts.map((p) => feedItem(
+    `${link(p.by)} · ${ago(p.takenAt)} · ${fmt(p.replies)} комм. · ${fmt(p.likes)} лайков${p.fresh ? '<span class="pill ok">новый</span>' : ''} · ${postLink(p.by, p.code)}`, p.text)).join('')
+    : '<div class="empty">Постов пока нет. Они появятся, когда в базе будут авторы и вы включите дежурство.</div>';
+  $('commentFeed').innerHTML = S.feed.length ? S.feed.map((c) => feedItem(
+    `${link(c.by)} → ${c.to ? link(c.to) : '?'} · ${ago(c.takenAt)}${c.fresh ? '<span class="pill ok">новый</span>' : ''} · ${postLink(c.by, c.code)}`, c.text)).join('')
+    : '<div class="empty">Комментариев пока нет. Добавьте ищейку и нажмите «Найти авторов».</div>';
+
+  $('postHist').innerHTML = (S.posts || []).length ? S.posts.slice(0, 10).map((p) => feedItem(
+    `${new Date(p.at).toLocaleString('ru')} · ${p.ok ? '<span class="pill ok">опубликован</span>' : `<span class="pill warn">не вышел</span> ${esc(p.error || '')}`}`, p.text)).join('')
+    : '<div class="dim">Вы ещё ничего не публиковали.</div>';
   renderJob();
 }
 
 function renderJob() {
-  const j = S.job;
-  $('run').hidden = $('watch').hidden = $('duty').hidden = j.running; $('stop').hidden = !j.running || j.phase === 'Публикация';
-  $('postSend').disabled = j.running;
-  const r = S.lastRun;
-  $('status').textContent = j.running ? `${j.phase || 'Работаю'}${j.total ? ` — ${j.done} из ${j.total}` : '…'}`
-    : r ? `Последний запуск ${new Date(r.at).toLocaleString('ru')}: ${r.mode === 'watch' ? '' : `проверено ${r.evaluated}, подходящих ${r.found}, `}в базу по ищейкам ${r.autoTracked ?? 0}, новых комментариев ${r.newComments ?? 0}` : 'Готов к запуску';
+  const j = S.job, r = S.lastRun;
+  const duty = j.running && /^Дежурство/.test(j.phase || '');
+  $('dot').classList.toggle('live', j.running);
+  $('status').textContent = j.running ? (duty ? 'Дежурство включено' : j.phase || 'Работаю') : 'Ничего не запущено';
+  $('substatus').textContent = j.running ? (duty ? j.phase.replace(/^Дежурство:\s*/, '') : j.total ? `${j.done} из ${j.total}` : '')
+    : r ? `Последний запуск ${ago(Date.parse(r.at) / 1000)}: в базу добавлено ${r.autoTracked ?? 0}, новых комментариев ${r.newComments ?? 0}` : 'Начните с шага 1.';
+  $('stop').hidden = !j.running || j.phase === 'Публикация';
+  $('barWrap').hidden = !(j.running && j.total);
   $('bar').style.width = j.running && j.total ? `${Math.round((j.done / j.total) * 100)}%` : '0';
+  $('bigDuty').textContent = duty ? 'Вкл' : 'Выкл';
+  for (const id of ['btnFind', 'btnFull', 'btnDuty', 'btnFollow', 'postSend']) $(id).disabled = j.running;
 }
 
 function addLog(e) {
@@ -302,41 +453,55 @@ async function refresh(first) {
   render();
 }
 
-$('tabs').addEventListener('click', (e) => {
-  if (e.target.dataset.tab) { tab = e.target.dataset.tab; render(); }
-  if (e.target.id === 'csv') location.href = '/api/export.csv';
-  if (e.target.id === 'approveAll' && confirm('Одобрить всех найденных и добавить в базу авторов?')) api('/api/approve-all', {}).then((s) => { S = s; render(); });
-  if (e.target.id === 'followAll' && confirm(`Подписаться с аккаунта из профиля AdsPower на авторов базы (до ${S.settings.followPerRun} за раз)?`)) launch('follow');
-});
-$('tabs').addEventListener('change', (e) => { if (e.target.id === 'sort') { sort = e.target.value; render(); } });
-$('list').addEventListener('click', async (e) => {
-  const act = e.target.dataset.act;
+function go(p) { page = p; render(); window.scrollTo(0, 0); }
+async function saveSettings() {
+  S = await api('/api/settings', readSettings());
+  settingsDirty = false;
+  $('adsKey').value = ''; $('tgToken').value = '';
+  fillSettings();
+  render();
+  $('saved').textContent = 'Сохранено';
+  setTimeout(() => ($('saved').textContent = ''), 2000);
+}
+async function launch(mode) {
+  if (settingsDirty) await saveSettings();
+  if (!S.settings.adsProfile) { go('settings'); return toast('Сначала выберите профиль AdsPower'); }
+  if (!S.tracked.length && !S.scouts.length) { go('scouts'); return toast('Сначала добавьте ищейку'); }
+  $('log').textContent = '';
+  await api('/api/run', { mode });
+}
+async function addAccounts(inputId, kind) {
+  const add = $(inputId).value.split(/[\s,]+/).filter(Boolean);
+  if (!add.length) return;
+  S = await api('/api/seeds', { add, kind });
+  $(inputId).value = '';
+  render();
+}
+const followBase = () => confirm(`Подписаться с аккаунта из профиля AdsPower на авторов базы (до ${S.settings.followPerRun} за раз)?`) && launch('follow');
+
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  if (t.dataset.page) return go(t.dataset.page);
+  if (t.dataset.go) return go(t.dataset.go);
+  if (t.dataset.seg) { seg = t.dataset.seg; return render(); }
+  if (t.id === 'approveAll') { if (confirm('Взять всех, кто ждёт проверки, в базу авторов?')) { S = await api('/api/approve-all', {}); seg = 'approved'; render(); } return; }
+  if (t.id === 'followAll') return followBase();
+  const act = t.dataset.act;
   if (!act) return;
-  const u = e.target.closest('.card').dataset.u;
+  const u = t.closest('[data-u]').dataset.u;
   if (act === 'seed') S = await api('/api/seeds', { add: [u] });
   else if (act === 'unscout') S = await api('/api/seeds', { kind: 'scout', remove: [u] });
   else if (act === 'unseed') S = await api('/api/seeds', { remove: [u] });
   else S = await api(`/api/account/${encodeURIComponent(u)}`, { status: act });
   render();
 });
-$('seeds').addEventListener('click', async (e) => { if (e.target.dataset.rm) { S = await api('/api/seeds', { remove: [e.target.dataset.rm] }); render(); } });
-$('seedAdd').onclick = async () => {
-  const add = $('seedInput').value.split(/[\s,]+/).filter(Boolean);
-  if (!add.length) return;
-  S = await api('/api/seeds', { add, kind: $('seedKind').value });
-  $('seedInput').value = '';
-  render();
-};
-async function saveSettings() {
-  S = await api('/api/settings', readSettings());
-  settingsDirty = false;
-  $('adsKey').value = ''; $('tgToken').value = '';
-  fillSettings();
-  $('saved').textContent = 'Сохранено';
-  setTimeout(() => ($('saved').textContent = ''), 2000);
-}
+$('sort').onchange = (e) => { sort = e.target.value; render(); };
+$('csv').onclick = () => (location.href = '/api/export.csv');
+$('seedAdd').onclick = () => addAccounts('seedInput', 'seed');
+$('scoutAdd').onclick = () => addAccounts('scoutInput', 'scout');
 $('saveSettings').onclick = saveSettings;
-document.querySelectorAll('.panel input, .panel select').forEach((el) => el.addEventListener('input', () => { if (!['seedInput', 'seedKind', 'postImage'].includes(el.id)) settingsDirty = true; }));
+document.querySelectorAll('[data-view="settings"] input, [data-view="settings"] select').forEach((el) => el.addEventListener('input', () => { settingsDirty = true; }));
 $('adsLoad').onclick = async () => {
   await api('/api/settings', readSettings());
   const { profiles } = await api('/api/adspower/profiles', {});
@@ -346,29 +511,17 @@ $('adsLoad').onclick = async () => {
   $('adsProfile').value = cur;
   if (!profiles.length) toast('В AdsPower нет профилей');
 };
-$('run').onclick = async () => {
-  await saveSettings();
-  if (!S.seeds.length && !S.scouts.length) return toast('Добавьте хотя бы один референс');
-  if (!S.settings.adsProfile) return toast('Выберите профиль AdsPower (кнопка ⟳)');
-  $('log').textContent = '';
-  await api('/api/run', {});
-};
-async function launch(mode) {
-  await saveSettings();
-  if (!S.tracked.length && !S.scouts.length) return toast('Добавьте хотя бы один референс или ищейку');
-  if (!S.settings.adsProfile) return toast('Выберите профиль AdsPower (кнопка ⟳)');
-  $('log').textContent = '';
-  await api('/api/run', { mode });
-}
-$('watch').onclick = () => launch('watch');
-$('duty').onclick = () => launch('monitor');
-$('tgTest').onclick = async () => { await saveSettings(); await api('/api/tg-test', {}); $('saved').textContent = 'Сообщение отправлено'; };
+$('btnFind').onclick = () => launch('watch');
+$('btnFull').onclick = () => { if (S.seeds.length) return launch('full'); seg = 'seed'; go('authors'); toast('Для полного поиска добавьте хотя бы один референс'); };
+$('btnDuty').onclick = () => launch('monitor');
+$('btnFollow').onclick = followBase;
+$('tgTest').onclick = async () => { await saveSettings(); await api('/api/tg-test', {}); toast('Сообщение отправлено — проверьте Telegram'); };
 $('postText').oninput = () => ($('postCount').textContent = `${[...$('postText').value].length} / 500`);
 $('postSend').onclick = async () => {
   const text = $('postText').value.trim();
   if (!text) return toast('Напишите текст поста');
-  if (!confirm('Опубликовать этот пост в Threads от имени аккаунта из выбранного профиля AdsPower?')) return;
-  await saveSettings();
+  if (!S.settings.adsProfile) { go('settings'); return toast('Сначала выберите профиль AdsPower'); }
+  if (!confirm('Опубликовать этот пост в Threads?')) return;
   const file = $('postImage').files[0];
   let image;
   if (file) {
@@ -377,7 +530,8 @@ $('postSend').onclick = async () => {
   }
   $('log').textContent = '';
   await api('/api/post', { text, image });
-  $('postText').value = ''; $('postImage').value = ''; $('postCount').textContent = '';
+  $('postText').value = ''; $('postImage').value = ''; $('postCount').textContent = '0 / 500';
+  toast('Публикую… результат появится в истории');
 };
 $('stop').onclick = () => api('/api/stop', {});
 
