@@ -67,6 +67,7 @@
 <header>
   <h1>Парсер Threads</h1>
   <div class="status"><span id="status">Загрузка…</span><div class="bar"><i id="bar"></i></div></div>
+  <button id="duty" title="Следить за лентой подписок и сообщать о новых постах авторов базы">Дежурство</button>
   <button id="watch" title="Обновить профили и комментарии авторов из базы">Обновить слежение</button>
   <button id="run" class="primary">Парсинг</button>
   <button id="stop" class="danger" hidden>Стоп</button>
@@ -91,6 +92,18 @@
     </div>
 
     <div class="panel">
+      <h2>Сигналы в Telegram</h2>
+      <label>Токен бота (от @BotFather)</label><input id="tgToken" type="password" autocomplete="off">
+      <label>Chat id (куда слать)</label><input id="tgChat">
+      <div class="grid2">
+        <div><label>Проверять ленту каждые, с</label><input id="monitorEvery" type="number" min="5"></div>
+        <div><label>Сигнал о постах моложе, мин</label><input id="alertMaxAgeMin" type="number" min="1"></div>
+      </div>
+      <div class="row" style="margin-top:10px"><button id="tgTest">Проверить</button></div>
+      <div class="hint">«Дежурство» смотрит ленту подписок профиля и сообщает о свежем посте автора из базы. Чтобы пост попадал в ленту, на автора нужно быть подписанным.</div>
+    </div>
+
+    <div class="panel">
       <h2>AdsPower</h2>
       <label>Профиль с выполненным входом в Threads</label>
       <div class="row"><select id="adsProfile"></select><button id="adsLoad" title="Загрузить список профилей">⟳</button></div>
@@ -111,6 +124,7 @@
         <div><label>Лайков на пост от</label><input id="minAvgLikes" type="number" min="0"></div>
       </div>
       <label class="row" style="color:var(--text)"><input type="checkbox" id="englishOnly" style="width:auto"> Только англоязычные посты и комментаторы</label>
+      <label class="row" style="color:var(--text)"><input type="checkbox" id="autoTrack" style="width:auto"> Авторов, под которыми комментируют ищейки, сразу брать в базу слежения</label>
       <label class="row" style="color:var(--text)"><input type="checkbox" id="requireLink" style="width:auto"> Только со ссылкой в профиле</label>
       <details style="margin-top:10px"><summary>Объём и скорость одного запуска</summary>
         <div class="grid2">
@@ -141,7 +155,7 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const NUM_FIELDS = ['minFollowers', 'minPostsPerWeek', 'minAvgReplies', 'minOverlap', 'postsPerSeed', 'commentersPerPost', 'maxAudience', 'maxCandidates', 'delayMin', 'delayMax', 'autoHours', 'minAvgLikes', 'scoutChecks', 'scoutMinPerDay'];
+const NUM_FIELDS = ['minFollowers', 'minPostsPerWeek', 'minAvgReplies', 'minOverlap', 'postsPerSeed', 'commentersPerPost', 'maxAudience', 'maxCandidates', 'delayMin', 'delayMax', 'autoHours', 'minAvgLikes', 'scoutChecks', 'scoutMinPerDay', 'monitorEvery', 'alertMaxAgeMin'];
 const TABS = [['new', 'Найденные'], ['approved', 'База авторов'], ['posts', 'Новые посты'], ['feed', 'Комментинг'], ['scout', 'Ищейки'], ['seed', 'Референсы'], ['rejected', 'Отклонённые'], ['filtered', 'Отсеянные']];
 let S = null, tab = 'new', sort = 'score', settingsDirty = false;
 
@@ -167,9 +181,12 @@ function fillSettings() {
   for (const k of NUM_FIELDS) $(k).value = s[k];
   $('adsUrl').value = s.adsUrl;
   $('adsKey').placeholder = s.hasKey ? 'сохранён' : '';
+  $('tgToken').placeholder = s.hasTg ? 'сохранён' : '';
+  $('tgChat').value = s.tgChat;
   $('closeBrowser').checked = s.closeBrowser;
   $('englishOnly').checked = s.englishOnly;
   $('requireLink').checked = s.requireLink;
+  $('autoTrack').checked = s.autoTrack;
   $('keywords').value = s.keywords.join(', ');
   const sel = $('adsProfile');
   if (![...sel.options].some((o) => o.value === s.adsProfile)) {
@@ -179,8 +196,8 @@ function fillSettings() {
 }
 
 function readSettings() {
-  const out = { adsUrl: $('adsUrl').value, adsKey: $('adsKey').value, adsProfile: $('adsProfile').value,
-    closeBrowser: $('closeBrowser').checked, englishOnly: $('englishOnly').checked, requireLink: $('requireLink').checked, keywords: $('keywords').value.split(',') };
+  const out = { adsUrl: $('adsUrl').value, adsKey: $('adsKey').value, tgToken: $('tgToken').value, tgChat: $('tgChat').value, adsProfile: $('adsProfile').value,
+    closeBrowser: $('closeBrowser').checked, englishOnly: $('englishOnly').checked, requireLink: $('requireLink').checked, autoTrack: $('autoTrack').checked, keywords: $('keywords').value.split(',') };
   for (const k of NUM_FIELDS) out[k] = Number($(k).value);
   return out;
 }
@@ -202,7 +219,7 @@ function card(a) {
     ${ava}
     <div>
       <div class="name"><a href="${esc(url)}" target="_blank" rel="noopener noreferrer">@${esc(a.username)}</a>${a.verified ? ' ✔' : ''}<span>${esc(a.fullName)}</span>
-        ${a.dead ? '<span class="tag warn">не отвечает</span>' : ''}${a.filterReason ? `<span class="tag warn">${esc(a.filterReason)}</span>` : ''}${a.via ? `<span class="tag">${esc(a.via)}</span>` : ''}</div>
+        ${a.dead ? '<span class="tag warn">не отвечает</span>' : ''}${a.followed ? '<span class="tag">подписаны</span>' : ''}${a.auto ? '<span class="tag">по следам ищеек</span>' : ''}${a.filterReason ? `<span class="tag warn">${esc(a.filterReason)}</span>` : ''}${a.via ? `<span class="tag">${esc(a.via)}</span>` : ''}</div>
       <div class="bio">${esc(a.bio)}</div>
       <div class="nums">
         <div><b>${fmt(a.followers)}</b> <span>подписчиков</span></div>
@@ -236,7 +253,7 @@ function render() {
     + `<span class="sp"></span><select id="sort">
         <option value="score">По оценке</option><option value="overlap">По пересечению аудитории</option>
         <option value="replies">По комментариям</option><option value="followers">По подписчикам</option><option value="activity">По частоте постов</option>
-       </select><button id="csv">CSV</button>`;
+       </select>${tab === 'new' && counts.new ? '<button id="approveAll">Одобрить всех</button>' : ''}${tab === 'approved' || tab === 'seed' ? '<button id="followAll">Подписаться на базу</button>' : ''}<button id="csv">CSV</button>`;
   $('sort').value = sort;
   const key = { score: (a) => a.score || 0, overlap: (a) => a.overlap || 0, replies: (a) => a.metrics?.avgReplies || 0,
     followers: (a) => a.followers || 0, activity: (a) => a.metrics?.postsPerWeek || 0 }[sort];
@@ -261,11 +278,11 @@ function render() {
 
 function renderJob() {
   const j = S.job;
-  $('run').hidden = $('watch').hidden = j.running; $('stop').hidden = !j.running || j.phase === 'Публикация';
+  $('run').hidden = $('watch').hidden = $('duty').hidden = j.running; $('stop').hidden = !j.running || j.phase === 'Публикация';
   $('postSend').disabled = j.running;
   const r = S.lastRun;
   $('status').textContent = j.running ? `${j.phase || 'Работаю'}${j.total ? ` — ${j.done} из ${j.total}` : '…'}`
-    : r ? `Последний запуск ${new Date(r.at).toLocaleString('ru')}: ${r.mode === 'watch' ? '' : `проверено ${r.evaluated}, подходящих ${r.found}, `}новых комментариев ${r.newComments ?? 0}` : 'Готов к запуску';
+    : r ? `Последний запуск ${new Date(r.at).toLocaleString('ru')}: ${r.mode === 'watch' ? '' : `проверено ${r.evaluated}, подходящих ${r.found}, `}в базу по ищейкам ${r.autoTracked ?? 0}, новых комментариев ${r.newComments ?? 0}` : 'Готов к запуску';
   $('bar').style.width = j.running && j.total ? `${Math.round((j.done / j.total) * 100)}%` : '0';
 }
 
@@ -288,6 +305,8 @@ async function refresh(first) {
 $('tabs').addEventListener('click', (e) => {
   if (e.target.dataset.tab) { tab = e.target.dataset.tab; render(); }
   if (e.target.id === 'csv') location.href = '/api/export.csv';
+  if (e.target.id === 'approveAll' && confirm('Одобрить всех найденных и добавить в базу авторов?')) api('/api/approve-all', {}).then((s) => { S = s; render(); });
+  if (e.target.id === 'followAll' && confirm(`Подписаться с аккаунта из профиля AdsPower на авторов базы (до ${S.settings.followPerRun} за раз)?`)) launch('follow');
 });
 $('tabs').addEventListener('change', (e) => { if (e.target.id === 'sort') { sort = e.target.value; render(); } });
 $('list').addEventListener('click', async (e) => {
@@ -311,7 +330,7 @@ $('seedAdd').onclick = async () => {
 async function saveSettings() {
   S = await api('/api/settings', readSettings());
   settingsDirty = false;
-  $('adsKey').value = '';
+  $('adsKey').value = ''; $('tgToken').value = '';
   fillSettings();
   $('saved').textContent = 'Сохранено';
   setTimeout(() => ($('saved').textContent = ''), 2000);
@@ -334,13 +353,16 @@ $('run').onclick = async () => {
   $('log').textContent = '';
   await api('/api/run', {});
 };
-$('watch').onclick = async () => {
+async function launch(mode) {
   await saveSettings();
   if (!S.tracked.length && !S.scouts.length) return toast('Добавьте хотя бы один референс или ищейку');
   if (!S.settings.adsProfile) return toast('Выберите профиль AdsPower (кнопка ⟳)');
   $('log').textContent = '';
-  await api('/api/run', { mode: 'watch' });
-};
+  await api('/api/run', { mode });
+}
+$('watch').onclick = () => launch('watch');
+$('duty').onclick = () => launch('monitor');
+$('tgTest').onclick = async () => { await saveSettings(); await api('/api/tg-test', {}); $('saved').textContent = 'Сообщение отправлено'; };
 $('postText').oninput = () => ($('postCount').textContent = `${[...$('postText').value].length} / 500`);
 $('postSend').onclick = async () => {
   const text = $('postText').value.trim();

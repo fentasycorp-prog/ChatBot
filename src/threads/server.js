@@ -7,7 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { load, save, cleanSettings, AVATARS, DIR } from './db.js';
 import { AdsPower } from './adspower.js';
 import os from 'node:os';
-import { crawl, publish, Stop, tracked, scouts } from './crawler.js';
+import { crawl, monitor, followBase, publish, Stop, tracked, scouts } from './crawler.js';
+import { tgSend } from './telegram.js';
 import { normName } from './extract.js';
 
 const PORT = Number(process.env.THREADS_PORT || 4330);
@@ -23,10 +24,11 @@ function emit(event, data) {
 }
 
 function start(mode = 'full') {
-  if (job.running) throw new Error('Парсинг уже идёт');
+  if (job.running) throw new Error('Сейчас уже идёт работа — дождитесь окончания или нажмите «Стоп»');
   Object.assign(job, { running: true, stop: false, phase: 'Запуск', done: 0, total: 0, log: [] });
   emit('status', { running: true });
-  crawl({ emit, isStopped: () => job.stop, mode })
+  const run = { monitor, follow: followBase }[mode] || crawl;
+  run({ emit, isStopped: () => job.stop, mode })
     .catch((e) => emit('log', { t: new Date().toISOString(), level: e instanceof Stop ? 'info' : 'error', msg: e instanceof Stop ? 'Остановлено пользователем' : e.message.split('\n')[0] }))
     .finally(() => { job.running = false; job.phase = ''; emit('status', { running: false }); });
 }
@@ -46,9 +48,9 @@ async function body(req) {
 
 function state() {
   const db = load();
-  const { adsKey, ...settings } = db.settings;
+  const { adsKey, tgToken, ...settings } = db.settings;
   return {
-    settings: { ...settings, hasKey: Boolean(adsKey) },
+    settings: { ...settings, hasKey: Boolean(adsKey), hasTg: Boolean(tgToken) },
     seeds: db.seeds,
     accounts: Object.values(db.accounts).map(({ comments, posts, ...a }) => a),
     scouts: scouts(db),
@@ -123,6 +125,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/settings') {
       const next = { ...args };
       if (!next.adsKey) delete next.adsKey;       // an empty field keeps the saved key
+      if (!next.tgToken) delete next.tgToken;
       db.settings = cleanSettings(next, db.settings);
       save();
       return json(res, 200, state());
@@ -164,7 +167,16 @@ const server = http.createServer(async (req, res) => {
       save();
       return json(res, 200, state());
     }
-    if (url.pathname === '/api/run') { start(args.mode === 'watch' ? 'watch' : 'full'); return json(res, 200, { ok: true }); }
+    if (url.pathname === '/api/run') { start(['watch', 'monitor', 'follow'].includes(args.mode) ? args.mode : 'full'); return json(res, 200, { ok: true }); }
+    if (url.pathname === '/api/tg-test') {
+      if (!(await tgSend(db.settings, '✅ Парсер Threads: сигналы о новых постах будут приходить сюда'))) throw new Error('Укажите токен бота и chat id');
+      return json(res, 200, { ok: true });
+    }
+    if (url.pathname === '/api/approve-all') {
+      for (const a of Object.values(db.accounts)) if (a.role === 'candidate' && a.status === 'new') a.status = 'approved';
+      save();
+      return json(res, 200, state());
+    }
     if (url.pathname === '/api/post') {
       const text = String(args.text || '').trim();
       if (!text) throw new Error('Напишите текст поста');

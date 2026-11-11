@@ -9,6 +9,8 @@ export const SELECTORS = {
   followersLink: /\bfollowers?\b|подписчик/i,       // the "12.3K followers" line in a profile header
   followingTab: /\bfollowing\b|подписки/i,          // the tab inside the followers dialog
   dialog: '[role="dialog"]',
+  followBtn: /^(follow|follow back|подписаться)$/i,
+  followingBtn: /^(following|requested|подписки|вы подписаны)$/i,
   composeOpen: /what['’]s new|start a thread|что нового/i,   // the "What's new?" box on the home feed
   composeBox: '[contenteditable="true"], textarea',
   composeFile: 'input[type="file"]',
@@ -181,6 +183,29 @@ export class Threads {
     await this.scroll(scrolls, () => this.bag.posts.size);
     const authors = new Set([...this.bag.posts.values()].filter((p) => !p.embedded).map((p) => p.username));
     return { authors: [...authors], users: this.bag.users };
+  }
+
+  // Posts currently shown in a feed page (for example the Following feed).
+  async feed(pathname) {
+    await this.goto(pathname);
+    return [...this.bag.posts.values()].filter((p) => !p.embedded && !p.isReply);
+  }
+
+  // Follow an account from the logged-in profile. Returns 'followed' or 'already'.
+  async follow(username) {
+    const name = normName(username);
+    await this.goto(`/@${name}`);
+    const page = this.page;
+    const done = page.getByRole('button', { name: SELECTORS.followingBtn }).first();
+    const btn = page.getByRole('button', { name: SELECTORS.followBtn }).first();
+    if ((await btn.count()) === 0) {
+      if (await done.count()) return 'already';
+      await this.dump(`follow-${name}`);
+      throw new Error('кнопка «Follow» не найдена');
+    }
+    await btn.click({ timeout: 6000 });
+    await done.waitFor({ state: 'visible', timeout: 10000 });
+    return 'followed';
   }
 
   // Publish one post from the logged-in account. Throws unless the composer closed after "Post".

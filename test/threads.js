@@ -81,7 +81,8 @@ const SKYE_REPLIES = [
 // spam_bot comments in bulk, mostly under kelly_hot.
 const BOT_REPLIES = [...Array(12)].map((_, i) => [post(i % 4 ? 'kelly_hot' : 'megan_big', `X${i}`, 5, 1, 1, 'x'),
   post('spam_bot', `BC${i}`, 1 + i, 0, 0, 'you are so pretty, check my bio', { is_reply: true, reply_to_author: { username: i % 4 ? 'kelly_hot' : 'megan_big' } })]);
-const POSTED = [];
+const POSTED = [], FOLLOWED = [], TG = [];
+const FEED = [post('lola', 'LNEW', 2 / 60, 10, 1, 'just posted this, what do you think'), post('bob', 'BNEW', 1 / 60, 5, 0, 'fresh one from someone outside the base'), post('lola', 'LOLD', 30, 900, 50, 'an older one')];
 const HOME = `<h1>home</h1><div id="open" style="cursor:pointer">What's new?</div><script>
   document.getElementById('open').onclick = () => {
     const d = document.createElement('div'); d.setAttribute('role', 'dialog'); d.style.cssText = 'position:fixed;inset:40px;background:#fff';
@@ -114,6 +115,7 @@ const site = http.createServer((req, res) => {
   const seg = url.pathname.split('/').filter(Boolean);
   const html = (body) => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(`<!doctype html><meta charset="utf-8"><body>${body}</body>`); };
   if (seg[0] === 'api') {
+    if (url.searchParams.has('follow')) { FOLLOWED.push(url.searchParams.get('follow')); res.writeHead(200); return res.end('{}'); }
     if (url.searchParams.has('post')) { POSTED.push({ text: url.searchParams.get('post'), files: Number(url.searchParams.get('files')) }); res.writeHead(200); return res.end('{}'); }
     const list = FOLLOWING[url.searchParams.get('following')] || [];
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -122,6 +124,7 @@ const site = http.createServer((req, res) => {
   if (seg[0] === 'pic') { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(Buffer.from([0xff, 0xd8, 0xff, 0xd9])); }
   const name = (seg[0] || '').replace(/^@/, '');
   if (!seg[0]) return html(HOME);
+  if (seg[0] === 'following') return html(blob({ feed: { edges: FEED.map((p) => ({ node: { thread_items: [p] } })) } }) + '<h1>following</h1>');
   if (!USERS[name]) return html('<p>Sorry, this page is not available</p>');
   if (seg[1] === 'replies') {
     return html(blob({ data: { edges: (name === 'skye' ? SKYE_REPLIES : name === 'spam_bot' ? BOT_REPLIES : []).map((thread_items) => ({ node: { thread_items } })) } }) + '<h1>replies</h1>');
@@ -135,7 +138,7 @@ const site = http.createServer((req, res) => {
   const u = USERS[name];
   const count = u.domFollowers || `${u.follower_count} followers`;
   html(blob({ user: userJson(name), mediaData: { edges: (u.posts || []).map((p) => ({ node: { thread_items: [p] } })) } })
-    + `<h1>${name}</h1><span id="fl" style="cursor:pointer">${count}</span><p>my followers are the best</p><script>const NAME=${JSON.stringify(name)}</script>${DIALOG_JS}`);
+    + `<h1>${name}</h1><span id="fl" style="cursor:pointer">${count}</span><div role="button" id="fb" onclick="fetch('/api/graphql?follow=' + NAME); this.textContent = 'Following'">Follow</div><p>my followers are the best</p><script>const NAME=${JSON.stringify(name)}</script>${DIALOG_JS}`);
 });
 
 // ---------- fake AdsPower ----------
@@ -170,11 +173,17 @@ if (!CHROME) {
   process.exit(0);
 }
 
+const tg = http.createServer(async (req, res) => {
+  let b = ''; for await (const c of req) b += c;
+  TG.push({ url: req.url, ...JSON.parse(b) });
+  res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}');
+});
+const tgPort = await listen(tg);
 const sitePort = await listen(site);
 const adsPort = await listen(ads);
 const port = 4400 + Math.floor(Math.random() * 400);
 const app = spawn(process.execPath, [path.join(ROOT, 'src/threads/server.js')], {
-  env: { ...process.env, THREADS_HOME: path.join(tmp, 'data'), THREADS_PORT: String(port) }, stdio: ['ignore', 'pipe', 'inherit'],
+  env: { ...process.env, THREADS_HOME: path.join(tmp, 'data'), THREADS_PORT: String(port), TELEGRAM_API: `http://127.0.0.1:${tgPort}` }, stdio: ['ignore', 'pipe', 'inherit'],
 });
 const base = `http://127.0.0.1:${port}`;
 const call = async (p, data) => {
@@ -227,14 +236,16 @@ try {
     assert.equal(acc.spam_bot.role, 'scout', 'массовый комментатор должен стать ищейкой');
     assert.ok(acc.spam_bot.commentStats.perDay >= 8 && acc.spam_bot.commentStats.templated === 100, JSON.stringify(acc.spam_bot.commentStats));
     assert.equal(acc.fan1, undefined);
-    assert.equal(acc.kelly_hot.status, 'new');
+    assert.equal(acc.kelly_hot.status, 'approved');
     assert.match(acc.kelly_hot.via, /комментируют: @spam_bot/);
     assert.equal(acc.kelly_hot.scoutComments, 9);
     assert.equal(acc.megan_big.scoutComments, 3);
     assert.ok(acc.kelly_hot.metrics.posts30d === 8 && acc.kelly_hot.metrics.avgIntervalH === 9 && acc.kelly_hot.metrics.activeHours.length, JSON.stringify(acc.kelly_hot.metrics));
     assert.equal(st.newPosts.filter((p) => p.by === 'skye').length, 3);
     assert.equal(st.lastRun.newScouts, 1);
-    assert.equal(acc.megan_big.status, 'new');
+    assert.equal(acc.megan_big.status, 'approved', 'под ней комментирует ищейка — сразу в базу');
+    assert.equal(acc.megan_big.auto, true);
+    assert.equal(st.lastRun.autoTracked, 2);
     assert.match(acc.megan_big.via, /комментируют: @skye/);
     assert.deepEqual(acc.megan_big.commentedBy, ['skye', 'spam_bot']);
     assert.deepEqual(acc.megan_big.funnel, ['мультиссылка']);
@@ -263,7 +274,7 @@ try {
   await call('/api/run', { mode: 'watch' });
   let out = await wait();
   assert.ok(!st.job.running && !st.job.log.some((l) => l.level === 'error'), out);
-  assert.deepEqual(st.tracked, ['skye', 'nobody_here', 'lola']);
+  assert.deepEqual(st.tracked, ['skye', 'nobody_here', 'lola', 'kelly_hot', 'megan_big']);
   assert.equal(st.lastRun.mode, 'watch');
   assert.equal(st.lastRun.newComments, 0, 'те же комментарии не считаются новыми дважды');
   assert.equal(st.feed.length, 16);
@@ -283,11 +294,38 @@ try {
   assert.deepEqual(POSTED, [{ text: 'hello from the test stand', files: 1 }]);
   assert.equal(st.posts[0].ok, true);
   console.log('✓ постинг: текст и картинка ушли один раз');
+
+  st = await call('/api/settings', { tgToken: 'TOKEN', tgChat: '42', monitorEvery: 5 });
+  assert.ok(st.settings.hasTg && st.settings.tgToken === undefined, 'токен бота не должен уходить в браузер');
+  await call('/api/tg-test', {});
+  assert.deepEqual([TG[0].url, TG[0].chat_id], ['/botTOKEN/sendMessage', '42']);
+  await call('/api/run', { mode: 'follow' });
+  out = await wait();
+  assert.deepEqual(FOLLOWED, ['skye', 'lola', 'kelly_hot', 'megan_big'], out);
+  assert.ok(st.accounts.find((a) => a.username === 'lola').followed);
+  await call('/api/run', { mode: 'follow' });
+  out = await wait();
+  assert.match(out, /Подписываться не на кого/);
+  assert.equal(FOLLOWED.length, 4);
+
+  await call('/api/run', { mode: 'monitor' });
+  for (let i = 0; i < 120 && TG.length < 2; i++) await sleep(500);
+  await sleep(9000);   // at least one more cycle: the same post must not be signalled twice
+  st = await call('/api/state');
+  assert.equal(st.job.running, true, 'дежурство работает, пока его не остановят');
+  await call('/api/stop', {});
+  out = await wait();
+  const alerts = TG.slice(1);
+  assert.equal(alerts.length, 1, JSON.stringify(alerts) + out);
+  assert.ok(alerts[0].text.includes('@lola') && alerts[0].text.includes('/@lola/post/LNEW'), alerts[0].text);
+  assert.ok(st.newPosts.some((p) => p.code === 'LNEW') && st.newPosts.some((p) => p.code === 'LOLD'));
+  assert.match(out, /Остановлено пользователем/);
+  console.log('✓ дежурство: подписка на базу, один сигнал в Telegram о свежем посте');
 } finally {
   app.kill();
   chrome?.removeAllListeners('exit');
   chrome?.kill();
-  site.close(); ads.close();
+  site.close(); ads.close(); tg.close();
   await sleep(300);
   fs.rmSync(tmp, { recursive: true, force: true });
 }

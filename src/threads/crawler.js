@@ -8,6 +8,7 @@ import { AdsPower } from './adspower.js';
 import { Threads, Blocked } from './threads.js';
 import { metrics, score, femaleNameHint, isEnglish, funnel, commentStats } from './extract.js';
 import { load, save, AVATARS, DEBUG } from './db.js';
+import { tgSend } from './telegram.js';
 
 export class Stop extends Error { constructor() { super('Остановлено'); this.name = 'Stop'; } }
 
@@ -104,7 +105,7 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
   const log = (msg, level = 'info') => emit('log', { t: new Date().toISOString(), level, msg });
   const progress = (phase, done, total) => emit('progress', { phase, done, total });
   const check = () => { if (isStopped()) throw new Stop(); };
-  const stats = { mode, seeds: 0, commenters: 0, scanned: 0, evaluated: 0, found: 0, newComments: 0, newPosts: 0, newScouts: 0 };
+  const stats = { mode, seeds: 0, commenters: 0, scanned: 0, evaluated: 0, found: 0, newComments: 0, newPosts: 0, newScouts: 0, autoTracked: 0 };
   if (!tracked(db).length && !scouts(db).length) throw new Error('Добавьте хотя бы один референсный аккаунт');
 
   log('Открываю профиль AdsPower…');
@@ -191,15 +192,14 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
 
   try {
     if (!(await t.loggedIn())) log('Похоже, в профиле не выполнен вход в Threads: списки подписок могут не открыться.', 'warn');
-    if (mode === 'watch') {
-      await watch(() => true);
-      log(`Слежение обновлено. Авторов: ${tracked(db).length}, ищеек: ${scouts(db).length}, новых постов: ${stats.newPosts}, новых комментариев: ${stats.newComments}`);
-      return stats;
-    }
+    const seedSet = new Set(db.seeds);
+    const extra = new Map();   // candidates that did not come from a following list
+    let i = 0;
+    if (mode === 'watch') await watch(() => true);
 
+    if (mode === 'full') {
     // 1. References and the people who comment on them.
     const pool = new Map();
-    let i = 0;
     for (const seed of db.seeds) {
       progress('Референсы', i++, db.seeds.length);
       const r = await step(`@${seed}`, () => t.profile(seed, { scrolls: s.profileScrolls }));
@@ -216,7 +216,11 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
         for (const rep of reps || []) {
           if (seen.size >= s.commentersPerPost && !seen.has(rep.username)) continue;
           seen.add(rep.username);
-          const c = pool.get(rep.username) || { seeds: new Set(), comments: 0, english: null };
+          const c = pool.get(rep.username) || { seeds: new Set(), comments: 0, english: null, texts: new Set(), cta: false };
+          const norm = rep.text.toLowerCase().replace(/[^\p{L}\s]/gu, '').trim();
+          if (norm.split(/\s+/).length >= 3 && c.texts.has(norm)) c.repeats = true;
+          c.texts.add(norm);
+          if (/bio|profile|my page|dm me/i.test(rep.text)) c.cta = true;
           c.seeds.add(seed);
           c.comments++;
           const en = isEnglish(rep.text);
@@ -229,7 +233,6 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
     }
     progress('Референсы', db.seeds.length, db.seeds.length);
     stats.commenters = pool.size;
-    const seedSet = new Set(db.seeds);
     await watch((u) => !seedSet.has(u));
 
     // 2. Open the following list of the most relevant commenters.
@@ -242,7 +245,6 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
       .sort((a, b) => b[1].seeds.size - a[1].seeds.size || b[1].comments - a[1].comments)
       .slice(0, s.maxAudience);
     log(`Комментаторов: ${pool.size}. Открываю подписки у ${queue.length}`);
-    const extra = new Map();   // candidates that did not come from a following list
     i = 0;
     for (const [u, c] of queue) {
       progress('Аудитория', i++, queue.length);
@@ -262,7 +264,7 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
     // 2b. The busiest commenters: if one comments in bulk, keep it as a scout.
     const suspects = [...pool.entries()]
       .filter(([u]) => !seedSet.has(u) && !db.accounts[u])
-      .sort((a, b) => b[1].comments - a[1].comments || b[1].seeds.size - a[1].seeds.size)
+      .sort((a, b) => (Number(b[1].repeats || false) + Number(b[1].cta)) - (Number(a[1].repeats || false) + Number(a[1].cta)) || b[1].comments - a[1].comments)
       .slice(0, s.scoutChecks);
     i = 0;
     for (const [u] of suspects) {
@@ -287,6 +289,7 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
       log(`Поиск «${kw}»: ${r.authors.length} авторов`);
       for (const u of r.authors) if (!seedSet.has(u) && !extra.has(u)) extra.set(u, `поиск: ${kw}`);
     }
+    }
 
     // 4. Accounts under whose posts tracked authors comment: creators promote themselves next to bigger ones.
     const trackedSet = new Set([...tracked(db), ...Object.values(db.accounts).filter((a) => a.role === 'scout').map((a) => a.username)]);
@@ -303,7 +306,7 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
     }
     for (const [u, x] of targets) {
       if (db.accounts[u]) Object.assign(db.accounts[u], { commentedBy: [...x.authors], scoutComments: x.scoutN });
-      if ((x.authors.size >= 2 || x.n >= 3) && !extra.has(u)) extra.set(u, `у неё комментируют: ${[...x.authors].map((a) => `@${a}`).join(', ')}`);
+      if ((x.authors.size >= 2 || x.n >= 3 || x.scoutN >= s.minScoutComments) && !extra.has(u)) extra.set(u, `у неё комментируют: ${[...x.authors].map((a) => `@${a}`).join(', ')}`);
     }
 
     // 5. Rank candidates by audience overlap and evaluate the best ones.
@@ -332,19 +335,121 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
       });
       const reason = filterReason(acc, s);
       if (acc.status === 'new' || acc.status === 'filtered') acc.status = reason ? 'filtered' : 'new';
+      // Authors our scouts comment under go straight into the tracked base.
+      if (acc.status === 'new' && s.autoTrack && acc.scoutComments > 0) { acc.status = 'approved'; acc.auto = true; stats.autoTracked++; }
       acc.filterReason = reason;
       stats.evaluated++;
       if (!reason) stats.found++;
-      log(`@${u}: ${reason ? `отсеян — ${reason}` : `подходит, оценка ${acc.score}`}`);
+      log(`@${u}: ${reason ? `отсеян — ${reason}` : acc.auto && acc.status === 'approved' ? 'под ней комментируют ищейки — добавлена в базу слежения' : `подходит, оценка ${acc.score}`}`);
       if (i % 3 === 0) { save(); emit('change', {}); }
     }
     progress('Кандидаты', todo.length, todo.length);
-    log(`Готово. Новых ищеек: ${stats.newScouts}, новых постов авторов: ${stats.newPosts}, новых комментариев: ${stats.newComments}. Референсов: ${stats.seeds}, комментаторов: ${stats.commenters}, просмотрено подписок: ${stats.scanned}, проверено кандидатов: ${stats.evaluated}, подходящих: ${stats.found}`);
+    log(`Готово. Добавлено в базу по следам ищеек: ${stats.autoTracked}. Новых ищеек: ${stats.newScouts}, новых постов авторов: ${stats.newPosts}, новых комментариев: ${stats.newComments}. Референсов: ${stats.seeds}, комментаторов: ${stats.commenters}, просмотрено подписок: ${stats.scanned}, проверено кандидатов: ${stats.evaluated}, подходящих: ${stats.found}`);
     return stats;
   } finally {
     db.lastRun = { at: new Date().toISOString(), ...stats };
     db.lastWatchAt = db.lastRun.at;
     save();
+    emit('change', {});
+    await session.close();
+  }
+}
+
+// On-duty mode: keep checking the Following feed (plus a few base authors directly, in turn)
+// and signal every fresh post of a base author. Runs until stopped.
+export async function monitor({ emit, isStopped }) {
+  const db = load();
+  const s = db.settings;
+  const log = (msg, level = 'info') => emit('log', { t: new Date().toISOString(), level, msg });
+  const check = () => { if (isStopped()) throw new Stop(); };
+  if (!tracked(db).some((u) => db.accounts[u])) throw new Error('В базе нет авторов: сначала запустите «Парсинг» или «Обновить слежение»');
+  if (!s.tgToken || !s.tgChat) log('Telegram не настроен — сигналы будут только в этом журнале', 'warn');
+  log('Открываю профиль AdsPower…');
+  const session = await openSession(s, check);
+  const t = session.t;
+  let fails = 0, cycle = 0, turn = 0, alerts = 0;
+
+  const handle = async (posts) => {
+    const base = new Set(tracked(db));
+    let changed = false;
+    for (const p of posts) {
+      const acc = db.accounts[p.username];
+      if (!acc || !base.has(p.username) || p.isReply || !p.code || (acc.posts || []).some((x) => x.code === p.code)) continue;
+      mergePosts(acc, [p]);
+      changed = true;
+      const ageMin = p.takenAt ? (Date.now() / 1000 - p.takenAt) / 60 : null;
+      if (ageMin == null || ageMin > s.alertMaxAgeMin) continue;
+      alerts++;
+      const link = `${s.threadsBase}/@${p.username}/post/${p.code}`;
+      log(`НОВЫЙ ПОСТ @${p.username} (${Math.max(0, Math.round(ageMin))} мин назад): ${link}`);
+      await tgSend(s, `🆕 @${p.username} — новый пост, ${Math.max(0, Math.round(ageMin))} мин назад\n\n${p.text.slice(0, 500) || '(без текста)'}\n\n${link}`)
+        .catch((e) => log(e.message, 'warn'));
+    }
+    if (changed) { save(); emit('change', {}); }
+  };
+
+  try {
+    log(`Дежурство: проверяю ленту подписок каждые ${s.monitorEvery} с, сигнал о постах моложе ${s.alertMaxAgeMin} мин`);
+    for (;;) {
+      check();
+      try {
+        const feed = await t.feed(s.feedPath);
+        if (cycle === 0) log(`В ленте подписок постов: ${feed.length}`);
+        await handle(feed);
+        const list = tracked(db).filter((u) => db.accounts[u]);
+        for (let k = 0; k < Math.min(s.profilesPerCycle, list.length); k++) {
+          const r = await t.profile(list[turn++ % list.length], { scrolls: 0 });
+          await handle(r.posts);
+        }
+        fails = 0;
+      } catch (e) {
+        if (e instanceof Stop || e instanceof Blocked) throw e;
+        log(`Проверка не удалась: ${e.message.split('\n')[0]}`, 'warn');
+        if (++fails >= 5) throw new Error('Пять неудачных проверок подряд — дежурство остановлено');
+      }
+      cycle++;
+      emit('progress', { phase: `Дежурство: проверок ${cycle}, сигналов ${alerts}`, done: 0, total: 0 });
+      for (let i = 0; i < s.monitorEvery; i++) { check(); await new Promise((r) => setTimeout(r, 1000)); }
+    }
+  } catch (e) {
+    if (!(e instanceof Stop)) await tgSend(s, `⚠️ Дежурство остановлено: ${e.message.split('\n')[0]}`).catch(() => {});
+    throw e;
+  } finally {
+    save();
+    await session.close();
+  }
+}
+
+// Follow base authors from our profile so their posts show up in the Following feed.
+export async function followBase({ emit, isStopped }) {
+  const db = load();
+  const s = db.settings;
+  const log = (msg, level = 'info') => emit('log', { t: new Date().toISOString(), level, msg });
+  const check = () => { if (isStopped()) throw new Stop(); };
+  const list = tracked(db).filter((u) => db.accounts[u] && !db.accounts[u].followed).slice(0, s.followPerRun);
+  if (!list.length) throw new Error('Подписываться не на кого: все авторы базы уже отмечены как подписки');
+  log('Открываю профиль AdsPower…');
+  const session = await openSession(s, check);
+  let fails = 0, n = 0;
+  try {
+    for (const u of list) {
+      emit('progress', { phase: 'Подписка', done: n++, total: list.length });
+      check();
+      try {
+        const r = await session.t.follow(u);
+        db.accounts[u].followed = true;
+        save();
+        fails = 0;
+        log(`@${u}: ${r === 'already' ? 'уже подписаны' : 'подписались'}`);
+      } catch (e) {
+        if (e instanceof Stop || e instanceof Blocked) throw e;
+        log(`@${u}: ${e.message.split('\n')[0]}`, 'warn');
+        if (++fails >= 3) throw new Error('Три ошибки подряд — подписка остановлена. Скриншоты лежат в папке debug.');
+      }
+    }
+    const left = tracked(db).filter((u) => db.accounts[u] && !db.accounts[u].followed).length;
+    log(`Готово.${left ? ` Осталось ещё ${left} — нажмите ещё раз позже.` : ''}`);
+  } finally {
     emit('change', {});
     await session.close();
   }

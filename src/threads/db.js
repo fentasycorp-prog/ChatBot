@@ -13,6 +13,9 @@ export const SETTING_SPEC = {
   adsUrl: 'http://local.adspower.net:50325',
   adsKey: '',
   adsProfile: '',
+  tgToken: '',                     // Telegram bot token for new-post alerts
+  tgChat: '',                      // chat id the alerts go to
+  feedPath: '/following',          // the feed of accounts our profile follows
   threadsBase: 'https://www.threads.com',
   closeBrowser: true,
   englishOnly: true,
@@ -23,15 +26,21 @@ export const SETTING_SPEC = {
   followingScrolls: [6, 0, 60],
   profileScrolls: [3, 0, 20],
   commentScrolls: [3, 0, 30],      // how far to scroll an author's Replies tab
-  autoHours: [0, 0, 168],          // refresh tracked authors every N hours (0 = off)
+  autoHours: [0, 0, 168],
+  monitorEvery: [60, 5, 3600],     // on-duty mode: seconds between feed checks
+  alertMaxAgeMin: [15, 1, 1440],   // alert only about posts younger than this
+  profilesPerCycle: [2, 0, 20],    // base authors opened directly each cycle, in turn
+  followPerRun: [15, 1, 100],      // accounts to follow per button press          // refresh tracked authors every N hours (0 = off)
   maxCandidates: [30, 1, 300],     // candidate profiles evaluated per run
   minOverlap: [2, 1, 50],          // how many scanned commenters must follow a candidate
   minFollowers: [3000, 0, 1e8],
   minPostsPerWeek: [3, 0, 500],
   minAvgReplies: [5, 0, 1e6],
   minAvgLikes: [50, 0, 1e8],
-  requireLink: false,              // only accounts with a link in the bio
-  scoutChecks: [8, 0, 100],        // most active commenters checked per run for being a mass commenter
+  requireLink: false,
+  autoTrack: true,                 // authors that scouts comment under join the tracked base without manual approval
+  minScoutComments: [1, 1, 100],   // scout comments under an author needed to consider her              // only accounts with a link in the bio
+  scoutChecks: [20, 0, 100],        // most active commenters checked per run for being a mass commenter
   scoutMinPerDay: [8, 1, 1000],    // comments a day that make a commenter a scout
   delayMin: [2500, 0, 60000],      // pause between actions, ms
   delayMax: [6000, 0, 120000],
