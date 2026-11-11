@@ -57,6 +57,8 @@ const USERS = {
     posts: [...Array(9)].map((_, i) => post('lola', `L${i}`, 4 + i * 14, 2000, 120, 'tell me what you think of this and be honest with me')) },
   lisa: { full_name: 'Lisa Thompson', follower_count: 40000, posts: [post('lisa', 'I1', 24 * 20, 300, 40, 'it has been a while, I know')] },
   bob: { full_name: 'Bob', follower_count: 120, posts: [] },
+  megan_big: { full_name: 'Megan', follower_count: 500000, biography: 'all my links below', bio_links: [{ url: 'https://linktr.ee/megan' }],
+    posts: [...Array(8)].map((_, i) => post('megan_big', `M${i}`, 3 + i * 10, 9000, 400, 'what do you all think about this, tell me in the replies')) },
   bigfan: { full_name: 'Big Fan', follower_count: 50000, posts: [post('bigfan', 'B1', 24 * 50, 3, 0, 'that is all I have to say')] },
   fan1: { full_name: 'Mark', follower_count: 80 }, fan2: { full_name: 'Don', follower_count: 12 },
   fan3: { full_name: 'Dale', follower_count: 40 }, fan_ru: { full_name: 'Иван', follower_count: 5 },
@@ -65,6 +67,26 @@ const FOLLOWING = { fan1: ['lola', 'lisa', 'bob'], fan2: ['lola', 'lisa'], fan3:
 const REPLIES = { S1: [['fan1', 'you are the best, I love this so much'], ['fan2', 'what a great picture, you look so good in it'],
   ['fan_ru', 'очень красивая фотография, мне нравится'], ['bigfan', 'this is what I like to see on my feed']],
   S2: [['fan1', 'the weather is not that bad if you ask me'], ['fan3', 'I think it is so nice that you are here']] };
+
+// skye's Replies tab: three comments under megan_big (two with the same text), one under lola without reply_to_author.
+const SKYE_REPLIES = [
+  [post('megan_big', 'M0', 3, 9000, 400, 'x'), post('skye', 'C1', 2, 5, 0, 'you look so good, check my bio', { is_reply: true, reply_to_author: { username: 'megan_big' } })],
+  [post('megan_big', 'M1', 13, 9000, 400, 'x'), post('skye', 'C2', 12, 4, 0, 'you look so good, check my bio', { is_reply: true, reply_to_author: { username: 'megan_big' } })],
+  [post('megan_big', 'M2', 23, 9000, 400, 'x'), post('skye', 'C3', 22, 9, 1, 'this is what I needed today', { is_reply: true, reply_to_author: { username: 'megan_big' } })],
+  [post('lola', 'L0', 4, 2000, 120, 'x'), post('skye', 'C4', 3, 2, 0, 'so true, I think that all the time')],
+];
+const POSTED = [];
+const HOME = `<h1>home</h1><div id="open" style="cursor:pointer">What's new?</div><script>
+  document.getElementById('open').onclick = () => {
+    const d = document.createElement('div'); d.setAttribute('role', 'dialog'); d.style.cssText = 'position:fixed;inset:40px;background:#fff';
+    d.innerHTML = '<div contenteditable="true" style="min-height:40px"></div><input type="file"><div role="button" id="go">Post</div>';
+    document.body.append(d);
+    d.querySelector('#go').onclick = async () => {
+      await fetch('/api/graphql?post=' + encodeURIComponent(d.querySelector('[contenteditable]').innerText) + '&files=' + d.querySelector('input').files.length);
+      d.remove();
+    };
+  };
+</script>`;
 
 const userJson = (name) => { const { posts, domFollowers, ...u } = USERS[name]; return { pk: `id_${name}`, username: name, profile_pic_url: `/pic/${name}.jpg`, ...u }; };
 const blob = (data) => `<script type="application/json" data-sjs>${JSON.stringify({ require: [['Relay', null, null, [{ __bbox: { result: { data } } }]]] })}</script>`;
@@ -86,14 +108,18 @@ const site = http.createServer((req, res) => {
   const seg = url.pathname.split('/').filter(Boolean);
   const html = (body) => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(`<!doctype html><meta charset="utf-8"><body>${body}</body>`); };
   if (seg[0] === 'api') {
+    if (url.searchParams.has('post')) { POSTED.push({ text: url.searchParams.get('post'), files: Number(url.searchParams.get('files')) }); res.writeHead(200); return res.end('{}'); }
     const list = FOLLOWING[url.searchParams.get('following')] || [];
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ data: { following: { edges: list.map((u) => ({ node: userJson(u) })) } } }));
   }
   if (seg[0] === 'pic') { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(Buffer.from([0xff, 0xd8, 0xff, 0xd9])); }
   const name = (seg[0] || '').replace(/^@/, '');
-  if (!seg[0]) return html('<h1>home</h1>');
+  if (!seg[0]) return html(HOME);
   if (!USERS[name]) return html('<p>Sorry, this page is not available</p>');
+  if (seg[1] === 'replies') {
+    return html(blob({ data: { edges: (name === 'skye' ? SKYE_REPLIES : []).map((thread_items) => ({ node: { thread_items } })) } }) + '<h1>replies</h1>');
+  }
   if (seg[1] === 'post') {
     const own = USERS[name].posts.find((p) => p.post.code === seg[2]);
     own.post.text_post_app_info.share_info = { quoted_post: post('quoted_guy', 'Q1', 99, 1, 0, 'quoted').post };
@@ -191,7 +217,18 @@ try {
     assert.equal(acc.bob.status, 'filtered', 'bob: пересечение 2, но мало подписчиков');
     for (const no of ['fan_ru', 'quoted_guy', 'some_follower', 'fan1', 'nobody_here']) assert.equal(acc[no], undefined, `${no} не должен попасть в кандидаты`);
     assert.equal(st.audienceScanned, 4);
-    assert.equal(st.lastRun.found, 1);
+    assert.equal(st.lastRun.found, 2);
+    assert.equal(acc.megan_big.status, 'new');
+    assert.match(acc.megan_big.via, /комментируют: @skye/);
+    assert.deepEqual(acc.megan_big.commentedBy, ['skye']);
+    assert.deepEqual(acc.megan_big.funnel, ['мультиссылка']);
+    assert.deepEqual(acc.skye.commentStats.targets[0], { to: 'megan_big', count: 3 });
+    assert.equal(acc.skye.commentStats.templated, 50);
+    assert.equal(acc.skye.commentStats.cta, 50);
+    assert.equal(acc.skye.comments, undefined, 'история комментариев отдаётся только лентой');
+    assert.equal(st.feed.length, 4);
+    assert.equal(st.feed.find((c) => c.code === 'C4').to, 'lola', 'адресат по порядку в ветке');
+    assert.equal(st.lastRun.newComments, 4);
     assert.equal(started, 1);
     assert.equal(stopped, 1, 'браузер, который открыл парсер, должен быть закрыт');
   } catch (e) { console.error(logText); throw e; }
@@ -204,6 +241,26 @@ try {
   assert.ok(csv.includes('"lola"') && !csv.includes('"lisa"'));
   assert.ok(!fs.readFileSync(path.join(tmp, 'data', 'db.json'), 'utf8').includes('quoted_guy'));
   console.log('✓ сквозной прогон: AdsPower → Threads → кандидаты → панель');
+
+  const wait = async () => { for (let i = 0; i < 120; i++) { await sleep(500); st = await call('/api/state'); if (!st.job.running) break; } return st.job.log.map((l) => `[${l.level}] ${l.msg}`).join('\n'); };
+  await call('/api/seeds', { remove: ['lola'] });   // back to the approved base: still tracked
+  await call('/api/run', { mode: 'watch' });
+  let out = await wait();
+  assert.ok(!st.job.running && !st.job.log.some((l) => l.level === 'error'), out);
+  assert.deepEqual(st.tracked, ['skye', 'nobody_here', 'lola']);
+  assert.equal(st.lastRun.mode, 'watch');
+  assert.equal(st.lastRun.newComments, 0, 'те же комментарии не считаются новыми дважды');
+  assert.equal(st.feed.length, 4);
+  console.log('✓ слежение: повторный сбор комментариев без дублей');
+
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  await assert.rejects(call('/api/post', { text: 'x'.repeat(501) }), /500/);
+  await call('/api/post', { text: 'hello from the test stand', image: png });
+  out = await wait();
+  assert.ok(!st.job.running && !st.job.log.some((l) => l.level === 'error'), out);
+  assert.deepEqual(POSTED, [{ text: 'hello from the test stand', files: 1 }]);
+  assert.equal(st.posts[0].ok, true);
+  console.log('✓ постинг: текст и картинка ушли один раз');
 } finally {
   app.kill();
   chrome?.removeAllListeners('exit');

@@ -22,6 +22,8 @@ export const SETTING_SPEC = {
   maxAudience: [25, 1, 300],       // commenters whose following list is opened per run
   followingScrolls: [6, 0, 60],
   profileScrolls: [3, 0, 20],
+  commentScrolls: [3, 0, 30],      // how far to scroll an author's Replies tab
+  autoHours: [0, 0, 168],          // refresh tracked authors every N hours (0 = off)
   maxCandidates: [30, 1, 300],     // candidate profiles evaluated per run
   minOverlap: [2, 1, 50],          // how many scanned commenters must follow a candidate
   minFollowers: [3000, 0, 1e8],
@@ -62,6 +64,8 @@ export function load() {
     accounts: raw.accounts || {},   // username → profile card (references and candidates)
     audience: raw.audience || {},   // username → { seeds, following, scannedAt }
     lastRun: raw.lastRun || null,
+    lastWatchAt: raw.lastWatchAt || null,
+    posts: raw.posts || [],         // our own published posts: { at, text, ok }
   };
   return db;
 }

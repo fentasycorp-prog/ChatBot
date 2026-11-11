@@ -6,7 +6,7 @@ import path from 'node:path';
 import { chromium } from 'playwright-core';
 import { AdsPower } from './adspower.js';
 import { Threads, Blocked } from './threads.js';
-import { metrics, score, femaleNameHint, isEnglish } from './extract.js';
+import { metrics, score, femaleNameHint, isEnglish, funnel, commentStats } from './extract.js';
 import { load, save, AVATARS, DEBUG } from './db.js';
 
 export class Stop extends Error { constructor() { super('Остановлено'); this.name = 'Stop'; } }
@@ -41,22 +41,56 @@ function filterReason(acc, s) {
   return null;
 }
 
-export async function crawl({ emit, isStopped }) {
-  const db = load();
-  const s = db.settings;
-  const log = (msg, level = 'info') => emit('log', { t: new Date().toISOString(), level, msg });
-  const progress = (phase, done, total) => emit('progress', { phase, done, total });
-  const check = () => { if (isStopped()) throw new Stop(); };
-  const stats = { seeds: 0, commenters: 0, scanned: 0, evaluated: 0, found: 0 };
-  if (!db.seeds.length) throw new Error('Добавьте хотя бы один референсный аккаунт');
-
+// Connect to the AdsPower profile's browser and open a tab of our own.
+async function openSession(s, check) {
   const ads = new AdsPower(s.adsUrl, s.adsKey);
-  log('Открываю профиль AdsPower…');
   const { ws, started } = await ads.open(s.adsProfile);
   const browser = await chromium.connectOverCDP(ws);
   const context = browser.contexts()[0] || await browser.newContext();
   const page = await context.newPage();
   const t = new Threads(page, { base: s.threadsBase, delayMin: s.delayMin, delayMax: s.delayMax, debugDir: DEBUG, check });
+  return {
+    t,
+    async close() {
+      await page.close().catch(() => {});
+      await browser.close().catch(() => {});
+      if (started && s.closeBrowser) await ads.stop(s.adsProfile).catch(() => {});
+    },
+  };
+}
+
+// Authors we keep watching: references plus everyone approved into the base.
+export const tracked = (db) => [...new Set([...db.seeds,
+  ...Object.values(db.accounts).filter((a) => a.status === 'approved' && a.role !== 'seed').map((a) => a.username)])];
+
+// Add newly seen comments to an author's history; returns how many were new.
+function mergeComments(acc, list) {
+  const known = new Map((acc.comments || []).map((c) => [c.code, c]));
+  let added = 0;
+  for (const c of list) {
+    if (!c.code) continue;
+    if (!known.has(c.code)) added++;
+    known.set(c.code, { ...c, seenAt: known.get(c.code)?.seenAt || new Date().toISOString() });
+  }
+  acc.comments = [...known.values()].sort((a, b) => (b.takenAt || 0) - (a.takenAt || 0)).slice(0, 300);
+  acc.commentStats = commentStats(acc.comments);
+  acc.commentsAt = new Date().toISOString();
+  return added;
+}
+
+// mode 'full' — everything; 'watch' — only refresh tracked authors and their comments.
+export async function crawl({ emit, isStopped, mode = 'full' }) {
+  const db = load();
+  const s = db.settings;
+  const log = (msg, level = 'info') => emit('log', { t: new Date().toISOString(), level, msg });
+  const progress = (phase, done, total) => emit('progress', { phase, done, total });
+  const check = () => { if (isStopped()) throw new Stop(); };
+  const stats = { mode, seeds: 0, commenters: 0, scanned: 0, evaluated: 0, found: 0, newComments: 0 };
+  if (!tracked(db).length) throw new Error('Добавьте хотя бы один референсный аккаунт');
+
+  log('Открываю профиль AdsPower…');
+  const session = await openSession(s, check);
+  const t = session.t;
   let failures = 0;
 
   // Run one step; a single bad page must not end the run, but a streak of them should.
@@ -89,6 +123,7 @@ export async function crawl({ emit, isStopped }) {
       evaluatedAt: new Date().toISOString(),
     };
     acc.femaleName = femaleNameHint(acc.fullName, name);
+    acc.funnel = funnel(acc.links, acc.bio);
     acc.score = score(acc);
     if (u.pic && u.pic !== prev.picUrl) {
       const buf = await t.avatar(u.pic);
@@ -103,8 +138,36 @@ export async function crawl({ emit, isStopped }) {
     return acc;
   };
 
+  // Read what tracked authors comment and where. refresh(u) says whether to reload the profile card too.
+  const watch = async (refresh) => {
+    const list = tracked(db);
+    let n = 0;
+    for (const u of list) {
+      progress('Комментинг авторов', n++, list.length);
+      if (refresh(u)) {
+        const r = await step(`@${u}`, () => t.profile(u, { scrolls: s.profileScrolls }));
+        if (r?.found) await saveCard(u, r, {});
+      }
+      if (!db.accounts[u]) continue;
+      const list2 = await step(`комментарии @${u}`, () => t.comments(u, { scrolls: s.commentScrolls }));
+      if (!list2) continue;
+      const added = mergeComments(db.accounts[u], list2);
+      stats.newComments += added;
+      const top = db.accounts[u].commentStats.targets.slice(0, 3).map((x) => `@${x.to}`).join(', ');
+      log(`@${u}: комментариев ${list2.length}, новых ${added}${top ? `, чаще всего у ${top}` : ''}`);
+      save();
+      emit('change', {});
+    }
+    progress('Комментинг авторов', list.length, list.length);
+  };
+
   try {
     if (!(await t.loggedIn())) log('Похоже, в профиле не выполнен вход в Threads: списки подписок могут не открыться.', 'warn');
+    if (mode === 'watch') {
+      await watch(() => true);
+      log(`Слежение обновлено. Авторов: ${tracked(db).length}, новых комментариев: ${stats.newComments}`);
+      return stats;
+    }
 
     // 1. References and the people who comment on them.
     const pool = new Map();
@@ -138,9 +201,10 @@ export async function crawl({ emit, isStopped }) {
     }
     progress('Референсы', db.seeds.length, db.seeds.length);
     stats.commenters = pool.size;
+    const seedSet = new Set(db.seeds);
+    await watch((u) => !seedSet.has(u));
 
     // 2. Open the following list of the most relevant commenters.
-    const seedSet = new Set(db.seeds);
     for (const [u, c] of pool) {
       const a = db.audience[u];
       if (a) a.seeds = [...new Set([...(a.seeds || []), ...c.seeds])];
@@ -175,7 +239,24 @@ export async function crawl({ emit, isStopped }) {
       for (const u of r.authors) if (!seedSet.has(u) && !extra.has(u)) extra.set(u, `поиск: ${kw}`);
     }
 
-    // 4. Rank candidates by audience overlap and evaluate the best ones.
+    // 4. Accounts under whose posts tracked authors comment: creators promote themselves next to bigger ones.
+    const trackedSet = new Set(tracked(db));
+    const targets = new Map();
+    for (const u of trackedSet) {
+      for (const c of db.accounts[u]?.comments || []) {
+        if (!c.to || trackedSet.has(c.to)) continue;
+        const x = targets.get(c.to) || { authors: new Set(), n: 0 };
+        x.authors.add(u);
+        x.n++;
+        targets.set(c.to, x);
+      }
+    }
+    for (const [u, x] of targets) {
+      if (db.accounts[u]) db.accounts[u].commentedBy = [...x.authors];
+      if ((x.authors.size >= 2 || x.n >= 3) && !extra.has(u)) extra.set(u, `у неё комментируют: ${[...x.authors].map((a) => `@${a}`).join(', ')}`);
+    }
+
+    // 5. Rank candidates by audience overlap and evaluate the best ones.
     const counts = tally(db);
     for (const [u, c] of counts) {
       const acc = db.accounts[u];
@@ -186,8 +267,8 @@ export async function crawl({ emit, isStopped }) {
     for (const [u] of extra) if (!wanted.has(u)) wanted.set(u, counts.get(u) || { overlap: 0, by: [], sources: new Set() });
     const below = [...counts.values()].filter((c) => c.overlap < s.minOverlap).length;
     const todo = [...wanted.entries()]
-      .filter(([u]) => !fresh(db.accounts[u]?.evaluatedAt, s.reevalDays))
-      .sort((a, b) => b[1].overlap - a[1].overlap)
+      .filter(([u]) => !trackedSet.has(u) && !fresh(db.accounts[u]?.evaluatedAt, s.reevalDays))
+      .sort((a, b) => b[1].overlap - a[1].overlap || (targets.get(b[0])?.n || 0) - (targets.get(a[0])?.n || 0))
       .slice(0, s.maxCandidates);
     log(`Кандидатов: ${wanted.size} (ещё ${below} ниже порога пересечения ${s.minOverlap}). Проверяю ${todo.length}`);
     i = 0;
@@ -197,6 +278,7 @@ export async function crawl({ emit, isStopped }) {
       if (!r || !r.found) continue;
       const acc = await saveCard(u, r, {
         role: 'candidate', overlap: c.overlap, followedBy: c.by, sources: [...c.sources], via: extra.get(u) || null,
+        commentedBy: [...(targets.get(u)?.authors || [])],
       });
       const reason = filterReason(acc, s);
       if (acc.status === 'new' || acc.status === 'filtered') acc.status = reason ? 'filtered' : 'new';
@@ -207,14 +289,35 @@ export async function crawl({ emit, isStopped }) {
       if (i % 3 === 0) { save(); emit('change', {}); }
     }
     progress('Кандидаты', todo.length, todo.length);
-    log(`Готово. Референсов: ${stats.seeds}, комментаторов: ${stats.commenters}, просмотрено подписок: ${stats.scanned}, проверено кандидатов: ${stats.evaluated}, подходящих: ${stats.found}`);
+    log(`Готово. Новых комментариев авторов: ${stats.newComments}. Референсов: ${stats.seeds}, комментаторов: ${stats.commenters}, просмотрено подписок: ${stats.scanned}, проверено кандидатов: ${stats.evaluated}, подходящих: ${stats.found}`);
     return stats;
   } finally {
     db.lastRun = { at: new Date().toISOString(), ...stats };
+    db.lastWatchAt = db.lastRun.at;
     save();
     emit('change', {});
-    await page.close().catch(() => {});
-    await browser.close().catch(() => {});
-    if (started && s.closeBrowser) await ads.stop(s.adsProfile).catch(() => {});
+    await session.close();
+  }
+}
+
+// Publish one ordinary post from the profile's own account.
+export async function publish({ emit, text, image }) {
+  const db = load();
+  const log = (msg, level = 'info') => emit('log', { t: new Date().toISOString(), level, msg });
+  log('Открываю профиль AdsPower…');
+  const session = await openSession(db.settings, () => {});
+  const entry = { at: new Date().toISOString(), text, image: Boolean(image), ok: false };
+  try {
+    await session.t.post(text, image);
+    entry.ok = true;
+    log('Пост опубликован');
+  } catch (e) {
+    entry.error = e.message.split('\n')[0];
+    throw e;
+  } finally {
+    db.posts = [entry, ...(db.posts || [])].slice(0, 100);
+    save();
+    emit('change', {});
+    await session.close();
   }
 }

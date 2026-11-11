@@ -9,6 +9,10 @@ export const SELECTORS = {
   followersLink: /\bfollowers?\b|подписчик/i,       // the "12.3K followers" line in a profile header
   followingTab: /\bfollowing\b|подписки/i,          // the tab inside the followers dialog
   dialog: '[role="dialog"]',
+  composeOpen: /what['’]s new|start a thread|что нового/i,   // the "What's new?" box on the home feed
+  composeBox: '[contenteditable="true"], textarea',
+  composeFile: 'input[type="file"]',
+  composeSubmit: /^(post|опубликовать)$/i,
   profileLinks: 'a[href^="/@"]',
 };
 
@@ -110,6 +114,21 @@ export class Threads {
       .map((p) => ({ username: p.username, text: p.text, likes: p.likes }));
   }
 
+  // Comments the user left under other people's posts (the "Replies" tab): [{ code, text, to, takenAt, likes, replies }]
+  async comments(username, { scrolls = 3 } = {}) {
+    const name = normName(username);
+    await this.goto(`/@${name}/replies`);
+    await this.scroll(scrolls, () => this.bag.posts.size);
+    const out = [];
+    for (const [key, p] of this.bag.posts) {
+      if (p.username !== name || p.embedded) continue;
+      const to = p.replyTo || this.bag.parents.get(key) || null;
+      if (!(p.isReply || to) || to === name) continue;
+      out.push({ code: p.code, text: p.text.slice(0, 400), to, takenAt: p.takenAt, likes: p.likes, replies: p.replies });
+    }
+    return out;
+  }
+
   // Accounts a user follows. Returns { user, following: [username] } or following: null when the list is hidden.
   async following(username, { scrolls = 6 } = {}) {
     const name = normName(username);
@@ -161,6 +180,33 @@ export class Threads {
     await this.scroll(scrolls, () => this.bag.posts.size);
     const authors = new Set([...this.bag.posts.values()].filter((p) => !p.embedded).map((p) => p.username));
     return { authors: [...authors], users: this.bag.users };
+  }
+
+  // Publish one post from the logged-in account. Throws unless the composer closed after "Post".
+  async post(text, imagePath) {
+    const page = this.page;
+    await this.goto('/');
+    try {
+      await page.getByText(SELECTORS.composeOpen).first().click({ timeout: 8000 });
+      const dialog = page.locator(SELECTORS.dialog).last();
+      await dialog.waitFor({ state: 'visible', timeout: 8000 });
+      const box = dialog.locator(SELECTORS.composeBox).first();
+      await box.click({ timeout: 6000 });
+      await page.keyboard.insertText(text);
+      if (imagePath) {
+        await dialog.locator(SELECTORS.composeFile).first().setInputFiles(imagePath, { timeout: 8000 });
+        await page.waitForTimeout(3000);   // let the preview and upload settle
+      }
+      await this.pause(0.5);
+      const typed = await box.evaluate((el) => el.value ?? el.innerText);
+      if (!String(typed).includes(text.slice(0, 20))) throw new Error('текст не попал в поле ввода');
+      await dialog.getByRole('button', { name: SELECTORS.composeSubmit }).last().click({ timeout: 8000 });
+      await dialog.waitFor({ state: 'hidden', timeout: 30000 });
+    } catch (e) {
+      if (e instanceof Blocked) throw e;
+      await this.dump('post');
+      throw new Error(`Не удалось опубликовать пост: ${e.message.split('\n')[0]}. Проверьте в Threads, не появился ли он, прежде чем повторять.`);
+    }
   }
 
   // Download an avatar through the profile's browser (so it uses the profile's proxy).

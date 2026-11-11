@@ -2,7 +2,7 @@
 // JSON the site ships (embedded <script> blobs and GraphQL responses), and turn
 // a list of posts into activity/engagement numbers. No browser code here.
 
-export const newBag = () => ({ users: new Map(), posts: new Map() });
+export const newBag = () => ({ users: new Map(), posts: new Map(), parents: new Map() });
 
 export const normName = (u) => String(u || '').trim().replace(/^.*threads\.(?:net|com)\//i, '').replace(/^@/, '')
   .split(/[/?#\s]/)[0].toLowerCase();
@@ -57,6 +57,7 @@ function addPost(bag, o, embedded) {
     quotes: numOrNull(info.quote_count),
     takenAt: numOrNull(o.taken_at),
     isReply: Boolean(info.is_reply || info.reply_to_author),
+    replyTo: typeof info.reply_to_author?.username === 'string' ? info.reply_to_author.username.toLowerCase() : null,
     media: Boolean(o.image_versions2?.candidates?.length || o.video_versions?.length || o.carousel_media?.length),
     // A post quoted or reposted inside another one: not part of the page's own list.
     embedded: prev ? prev.embedded && embedded : embedded,
@@ -74,6 +75,16 @@ export function harvest(root, bag) {
     if (Array.isArray(node)) { for (const v of node) if (v && typeof v === 'object') stack.push([v, embedded]); continue; }
     if (isUser(node)) addUser(bag, node);
     if (isPost(node)) addPost(bag, node, embedded);
+    // In a thread each item answers the one before it: remember whose post a reply sits under.
+    if (Array.isArray(node.thread_items)) {
+      let prev = null;
+      for (const it of node.thread_items) {
+        const p = it?.post;
+        if (!p?.user || typeof p.user.username !== 'string') continue;
+        if (prev && (p.code || p.pk != null)) bag.parents.set(String(p.code || p.pk), prev);
+        prev = p.user.username.toLowerCase();
+      }
+    }
     for (const [k, v] of Object.entries(node)) {
       if (v && typeof v === 'object') stack.push([v, embedded || k === 'share_info' || k === 'linked_inline_media']);
     }
@@ -172,12 +183,44 @@ export function femaleNameHint(fullName, username) {
 }
 
 // 0–100. Audience overlap weighs most: it is the "same niche" signal.
-export function score({ overlap = 0, metrics: m, femaleName }) {
+export function score({ overlap = 0, commentedBy, metrics: m, femaleName }) {
   const cap = (x) => Math.max(0, Math.min(1, x));
-  const s = 40 * cap(overlap / 5)
+  const s = 40 * cap(((overlap || 0) + 2 * (commentedBy?.length || 0)) / 5)
     + 20 * cap((m?.postsPerWeek || 0) / 14)
     + 25 * cap(Math.log10(1 + (m?.avgReplies || 0)) / 2)
     + 10 * cap(Math.log10(1 + (m?.avgLikes || 0)) / 3)
     + (femaleName ? 5 : 0);
   return Math.round(s);
+}
+
+const LINK_KINDS = [[/onlyfans\.com/i, 'OnlyFans'], [/fansly\.com/i, 'Fansly'], [/fanvue\.com/i, 'Fanvue'], [/linktr\.ee|beacons\.ai|allmylinks|hoo\.be|bio\.site|link\.me|snipfeed|linkr\.bio|msha\.ke/i, 'мультиссылка'],
+  [/t\.me|telegram/i, 'Telegram'], [/instagram\.com/i, 'Instagram'], [/tiktok\.com/i, 'TikTok'], [/(twitter|x)\.com/i, 'X'], [/youtube\.com|youtu\.be/i, 'YouTube'],
+  [/snapchat\.com/i, 'Snapchat'], [/patreon\.com/i, 'Patreon'], [/throne\.com|amazon\.[a-z.]+\/.*wishlist/i, 'вишлист']];
+const CTA = /link in (my )?bio|check (out )?my (bio|profile|page)|on my (page|profile)|dm me|message me|follow me|my bio/i;
+
+// Where the author sends people: kinds of links in the bio.
+export function funnel(links, bio) {
+  const kinds = new Set();
+  for (const l of [...(links || []), String(bio || '')]) for (const [re, kind] of LINK_KINDS) if (re.test(l)) kinds.add(kind);
+  if (!kinds.size && (links || []).length) kinds.add('сайт');
+  return [...kinds];
+}
+
+// How an author comments under other people's posts.
+export function commentStats(comments, nowSec = Date.now() / 1000) {
+  const week = comments.filter((c) => c.takenAt && nowSec - c.takenAt <= 7 * DAY);
+  const norm = (c) => String(c.text || '').toLowerCase().replace(/[^\p{L}\s]/gu, '').replace(/\s+/g, ' ').trim();
+  const texts = comments.map(norm).filter((x) => x.split(' ').length >= 2);
+  const seen = new Map();
+  for (const x of texts) seen.set(x, (seen.get(x) || 0) + 1);
+  const targets = new Map();
+  for (const c of comments) if (c.to) targets.set(c.to, (targets.get(c.to) || 0) + 1);
+  return {
+    total: comments.length,
+    perDay: Math.round((week.length / 7) * 10) / 10,
+    // Share of comments whose text repeats word for word: a sign of templated commenting.
+    templated: texts.length >= 4 ? Math.round((texts.filter((x) => seen.get(x) >= 2).length / texts.length) * 100) : null,
+    cta: comments.length ? Math.round((comments.filter((c) => CTA.test(c.text || '')).length / comments.length) * 100) : null,
+    targets: [...targets.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([to, count]) => ({ to, count })),
+  };
 }

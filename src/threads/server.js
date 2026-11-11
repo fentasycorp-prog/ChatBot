@@ -6,7 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { load, save, cleanSettings, AVATARS, DIR } from './db.js';
 import { AdsPower } from './adspower.js';
-import { crawl, Stop } from './crawler.js';
+import os from 'node:os';
+import { crawl, publish, Stop, tracked } from './crawler.js';
 import { normName } from './extract.js';
 
 const PORT = Number(process.env.THREADS_PORT || 4330);
@@ -21,11 +22,11 @@ function emit(event, data) {
   for (const res of clients) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-function start() {
+function start(mode = 'full') {
   if (job.running) throw new Error('Парсинг уже идёт');
   Object.assign(job, { running: true, stop: false, phase: 'Запуск', done: 0, total: 0, log: [] });
   emit('status', { running: true });
-  crawl({ emit, isStopped: () => job.stop })
+  crawl({ emit, isStopped: () => job.stop, mode })
     .catch((e) => emit('log', { t: new Date().toISOString(), level: e instanceof Stop ? 'info' : 'error', msg: e instanceof Stop ? 'Остановлено пользователем' : e.message.split('\n')[0] }))
     .finally(() => { job.running = false; job.phase = ''; emit('status', { running: false }); });
 }
@@ -39,7 +40,7 @@ async function body(req) {
   if (!/^application\/json/i.test(req.headers['content-type'] || '')) throw new Error('Ожидается JSON');
   const chunks = [];
   let size = 0;
-  for await (const c of req) { size += c.length; if (size > 1e6) throw new Error('Слишком большой запрос'); chunks.push(c); }
+  for await (const c of req) { size += c.length; if (size > 14e6) throw new Error('Слишком большой запрос'); chunks.push(c); }
   return chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
 }
 
@@ -49,9 +50,15 @@ function state() {
   return {
     settings: { ...settings, hasKey: Boolean(adsKey) },
     seeds: db.seeds,
-    accounts: Object.values(db.accounts),
+    accounts: Object.values(db.accounts).map(({ comments, ...a }) => a),
+    tracked: tracked(db),
+    // Latest comments of tracked authors, newest first.
+    feed: Object.values(db.accounts).flatMap((a) => (a.comments || []).map((c) => ({ ...c, by: a.username })))
+      .sort((x, y) => (y.takenAt || 0) - (x.takenAt || 0)).slice(0, 200)
+      .map((c) => ({ ...c, fresh: Boolean(db.lastRun && c.seenAt && Date.parse(db.lastRun.at) - Date.parse(c.seenAt) < 3600e3) })),
     audienceScanned: Object.values(db.audience).filter((a) => !a.hidden).length,
     lastRun: db.lastRun,
+    posts: (db.posts || []).slice(0, 20),
     job: { running: job.running, phase: job.phase, done: job.done, total: job.total, log: job.log.slice(-200) },
     dataDir: DIR,
   };
@@ -64,12 +71,14 @@ const csvCell = (v) => {
 };
 
 function csv(db) {
-  const rows = [['username', 'url', 'name', 'status', 'score', 'followers', 'posts_per_week', 'avg_likes', 'avg_replies', 'engagement_%', 'overlap', 'last_post', 'bio']];
+  const rows = [['username', 'url', 'name', 'status', 'score', 'followers', 'posts_per_week', 'avg_likes', 'avg_replies', 'engagement_%', 'overlap', 'last_post', 'comments_per_day', 'repeated_comments_%', 'comments_at', 'funnel', 'links', 'bio']];
   for (const a of Object.values(db.accounts).sort((x, y) => (y.score || 0) - (x.score || 0))) {
     if (a.status === 'filtered' || a.status === 'rejected') continue;
     const m = a.metrics || {};
     rows.push([a.username, `${db.settings.threadsBase}/@${a.username}`, a.fullName, a.role === 'seed' ? 'reference' : a.status, a.score, a.followers,
-      m.postsPerWeek, m.avgLikes, m.avgReplies, m.engagementRate, a.overlap ?? '', m.lastPostAt ? new Date(m.lastPostAt * 1000).toISOString().slice(0, 10) : '', a.bio]);
+      m.postsPerWeek, m.avgLikes, m.avgReplies, m.engagementRate, a.overlap ?? '', m.lastPostAt ? new Date(m.lastPostAt * 1000).toISOString().slice(0, 10) : '',
+      a.commentStats?.perDay ?? '', a.commentStats?.templated ?? '', (a.commentStats?.targets || []).map((x) => `${x.to}:${x.count}`).join(' '),
+      (a.funnel || []).join(' > '), (a.links || []).join(' '), a.bio]);
   }
   return '﻿' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
 }
@@ -139,7 +148,27 @@ const server = http.createServer(async (req, res) => {
       save();
       return json(res, 200, state());
     }
-    if (url.pathname === '/api/run') { start(); return json(res, 200, { ok: true }); }
+    if (url.pathname === '/api/run') { start(args.mode === 'watch' ? 'watch' : 'full'); return json(res, 200, { ok: true }); }
+    if (url.pathname === '/api/post') {
+      const text = String(args.text || '').trim();
+      if (!text) throw new Error('Напишите текст поста');
+      if ([...text].length > 500) throw new Error('В Threads пост не длиннее 500 символов');
+      if (!db.settings.adsProfile) throw new Error('Выберите профиль AdsPower');
+      if (job.running) throw new Error('Сейчас идёт парсинг — дождитесь окончания или нажмите «Стоп»');
+      let image = null;
+      const m = /^data:image\/(png|jpeg|webp);base64,(.+)$/.exec(args.image || '');
+      if (args.image && !m) throw new Error('Картинка должна быть PNG, JPG или WebP');
+      if (m) {
+        image = path.join(os.tmpdir(), `threads-post-${Date.now()}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`);
+        fs.writeFileSync(image, Buffer.from(m[2], 'base64'));
+      }
+      Object.assign(job, { running: true, stop: false, phase: 'Публикация', done: 0, total: 0, log: [] });
+      emit('status', { running: true });
+      publish({ emit, text, image })
+        .catch((e) => emit('log', { t: new Date().toISOString(), level: 'error', msg: e.message.split('\n')[0] }))
+        .finally(() => { if (image) fs.rmSync(image, { force: true }); job.running = false; job.phase = ''; emit('status', { running: false }); });
+      return json(res, 200, { ok: true });
+    }
     if (url.pathname === '/api/stop') { job.stop = true; return json(res, 200, { ok: true }); }
     json(res, 404, { error: 'Не найдено' });
   } catch (e) {
@@ -147,5 +176,16 @@ const server = http.createServer(async (req, res) => {
     else res.end();
   }
 });
+
+// Scheduled refresh of tracked authors (AdsPower must be running).
+setInterval(() => {
+  const db = load();
+  const h = db.settings.autoHours;
+  if (!h || job.running || !db.settings.adsProfile || !tracked(db).length) return;
+  if (db.lastWatchAt && Date.now() - Date.parse(db.lastWatchAt) < h * 3600e3) return;
+  db.lastWatchAt = new Date().toISOString();   // a failed attempt waits for the next slot instead of retrying every minute
+  save();
+  start('watch');
+}, 60000).unref();
 
 server.listen(PORT, HOST, () => console.log(`Парсер Threads: http://${HOST}:${PORT}  (данные: ${DIR})`));

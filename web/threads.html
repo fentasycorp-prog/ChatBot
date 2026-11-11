@@ -56,6 +56,10 @@
   .empty { color:var(--dim); padding:30px 10px; text-align:center; }
   .hint { color:var(--dim); font-size:12px; margin-top:6px; }
   details summary { cursor:pointer; color:var(--dim); font-size:13px; }
+  .feed { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:9px 12px; margin-bottom:8px; overflow-wrap:anywhere; }
+  .feed .who { font-size:13px; color:var(--dim); } .feed .who a { color:var(--text); text-decoration:none; font-weight:600; }
+  .feed.fresh { border-color:var(--accent); }
+  .hist { font-size:12px; color:var(--dim); margin-top:8px; overflow-wrap:anywhere; }
   #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#3a1f22; border:1px solid var(--bad); color:#ffd9d9; padding:9px 14px; border-radius:10px; display:none; max-width:90vw; z-index:9; }
 </style>
 </head>
@@ -63,6 +67,7 @@
 <header>
   <h1>Парсер Threads</h1>
   <div class="status"><span id="status">Загрузка…</span><div class="bar"><i id="bar"></i></div></div>
+  <button id="watch" title="Обновить профили и комментарии авторов из базы">Обновить слежение</button>
   <button id="run" class="primary">Парсинг</button>
   <button id="stop" class="danger" hidden>Стоп</button>
 </header>
@@ -75,6 +80,14 @@
       <div class="row" style="margin-top:8px"><button id="seedAdd">Добавить</button></div>
       <div class="chips" id="seeds"></div>
       <div class="hint">От этих аккаунтов парсер идёт к их комментаторам и смотрит, на кого те подписаны.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Новый пост</h2>
+      <textarea id="postText" maxlength="500" placeholder="Текст поста (до 500 символов)"></textarea>
+      <label>Картинка (необязательно)</label><input id="postImage" type="file" accept="image/png,image/jpeg,image/webp">
+      <div class="row" style="margin-top:8px"><button id="postSend">Опубликовать</button><span class="hint" id="postCount"></span></div>
+      <div id="postHist"></div>
     </div>
 
     <div class="panel">
@@ -106,6 +119,7 @@
           <div><label>Пауза от, мс</label><input id="delayMin" type="number" min="0" step="100"></div>
           <div><label>Пауза до, мс</label><input id="delayMax" type="number" min="0" step="100"></div>
         </div>
+        <label>Автообновление слежения, каждые N часов (0 — выключено)</label><input id="autoHours" type="number" min="0">
         <label>Ключевые слова для поиска (необязательно, через запятую)</label><input id="keywords">
       </details>
       <div class="row" style="margin-top:12px"><button id="saveSettings">Сохранить</button><span class="hint" id="saved"></span></div>
@@ -123,8 +137,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const NUM_FIELDS = ['minFollowers', 'minPostsPerWeek', 'minAvgReplies', 'minOverlap', 'postsPerSeed', 'commentersPerPost', 'maxAudience', 'maxCandidates', 'delayMin', 'delayMax'];
-const TABS = [['new', 'Найденные'], ['approved', 'Одобренные'], ['seed', 'Референсы'], ['rejected', 'Отклонённые'], ['filtered', 'Отсеянные']];
+const NUM_FIELDS = ['minFollowers', 'minPostsPerWeek', 'minAvgReplies', 'minOverlap', 'postsPerSeed', 'commentersPerPost', 'maxAudience', 'maxCandidates', 'delayMin', 'delayMax', 'autoHours'];
+const TABS = [['new', 'Найденные'], ['approved', 'База авторов'], ['feed', 'Комментинг'], ['seed', 'Референсы'], ['rejected', 'Отклонённые'], ['filtered', 'Отсеянные']];
 let S = null, tab = 'new', sort = 'score', settingsDirty = false;
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = 'none'), 6000); }
@@ -193,6 +207,11 @@ function card(a) {
         <div><span>последний пост:</span> <b>${ago(m.lastPostAt)}</b></div>
         ${overlap}
       </div>
+      ${a.commentStats ? `<div class="nums" style="margin-top:5px"><div><span>комментинг:</span> <b>${a.commentStats.perDay}</b> <span>в день</span></div>
+        ${a.commentStats.templated != null ? `<div><b>${a.commentStats.templated}%</b> <span>повторяющихся текстов</span></div>` : ''}
+        ${a.commentStats.targets.length ? `<div><span>чаще всего у:</span> ${a.commentStats.targets.slice(0, 4).map((x) => `@${esc(x.to)} ×${x.count}`).join(', ')}</div>` : ''}</div>` : ''}
+      ${a.funnel?.length ? `<div class="hint">Воронка: ${a.funnel.map(esc).join(' → ')}${(a.links || []).length ? ' · ' + a.links.slice(0, 3).map(esc).join(' , ') : ''}</div>` : ''}
+      ${a.commentedBy?.length ? `<div class="hint">У неё комментируют: ${a.commentedBy.map((x) => '@' + esc(x)).join(', ')}</div>` : ''}
       ${a.sources?.length ? `<div class="hint">Аудитория от: ${a.sources.map((x) => '@' + esc(x)).join(', ')}</div>` : ''}
       ${top ? `<div class="post">${esc(top.text.slice(0, 200)) || '(пост без текста)'} · 💬 ${fmt(top.replies)} · ♥ ${fmt(top.likes)} · <a href="${esc(url)}/post/${encodeURIComponent(top.code)}" target="_blank" rel="noopener noreferrer">открыть</a></div>` : ''}
     </div>
@@ -203,6 +222,7 @@ function card(a) {
 function render() {
   const counts = {};
   for (const a of S.accounts) counts[bucket(a)] = (counts[bucket(a)] || 0) + 1;
+  counts.feed = S.feed.length;
   $('tabs').innerHTML = TABS.map(([k, t]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${t} ${counts[k] || 0}</button>`).join('')
     + `<span class="sp"></span><select id="sort">
         <option value="score">По оценке</option><option value="overlap">По пересечению аудитории</option>
@@ -212,18 +232,26 @@ function render() {
   const key = { score: (a) => a.score || 0, overlap: (a) => a.overlap || 0, replies: (a) => a.metrics?.avgReplies || 0,
     followers: (a) => a.followers || 0, activity: (a) => a.metrics?.postsPerWeek || 0 }[sort];
   const rows = S.accounts.filter((a) => bucket(a) === tab).sort((a, b) => key(b) - key(a));
-  $('list').innerHTML = rows.length ? rows.map(card).join('')
+  const tb = S.settings.threadsBase;
+  if (tab === 'feed') $('list').innerHTML = S.feed.length ? S.feed.map((c) => `<div class="feed${c.fresh ? ' fresh' : ''}">
+      <div class="who"><a href="${esc(tb)}/@${encodeURIComponent(c.by)}" target="_blank" rel="noopener noreferrer">@${esc(c.by)}</a> → ${c.to ? `<a href="${esc(tb)}/@${encodeURIComponent(c.to)}" target="_blank" rel="noopener noreferrer">@${esc(c.to)}</a>` : '?'}
+        · ${ago(c.takenAt)} · ♥ ${fmt(c.likes)}${c.fresh ? ' · <b>новый</b>' : ''} · <a href="${esc(tb)}/@${encodeURIComponent(c.by)}/post/${encodeURIComponent(c.code)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-weight:400">открыть</a></div>
+      <div>${esc(c.text) || '(без текста)'}</div></div>`).join('')
+    : '<div class="empty">Здесь появятся комментарии, которые авторы из базы и референсы оставляют у других. Нажмите «Обновить слежение».</div>';
+  else $('list').innerHTML = rows.length ? rows.map(card).join('')
     : `<div class="empty">${tab === 'new' ? 'Пока пусто. Добавьте референсы, выберите профиль AdsPower и нажмите «Парсинг».' : 'Здесь пока ничего нет.'}</div>`;
   $('seeds').innerHTML = S.seeds.map((u) => `<span class="chip">@${esc(u)}<button data-rm="${esc(u)}" title="Убрать">×</button></span>`).join('');
+  $('postHist').innerHTML = (S.posts || []).slice(0, 4).map((p) => `<div class="hist">${p.ok ? '✓' : '✕'} ${new Date(p.at).toLocaleString('ru')} — ${esc(p.text.slice(0, 70))}${p.error ? ` <span style="color:var(--bad)">(${esc(p.error)})</span>` : ''}</div>`).join('');
   renderJob();
 }
 
 function renderJob() {
   const j = S.job;
-  $('run').hidden = j.running; $('stop').hidden = !j.running;
+  $('run').hidden = $('watch').hidden = j.running; $('stop').hidden = !j.running || j.phase === 'Публикация';
+  $('postSend').disabled = j.running;
   const r = S.lastRun;
   $('status').textContent = j.running ? `${j.phase || 'Работаю'}${j.total ? ` — ${j.done} из ${j.total}` : '…'}`
-    : r ? `Последний запуск ${new Date(r.at).toLocaleString('ru')}: проверено ${r.evaluated}, подходящих ${r.found}` : 'Готов к запуску';
+    : r ? `Последний запуск ${new Date(r.at).toLocaleString('ru')}: ${r.mode === 'watch' ? '' : `проверено ${r.evaluated}, подходящих ${r.found}, `}новых комментариев ${r.newComments ?? 0}` : 'Готов к запуску';
   $('bar').style.width = j.running && j.total ? `${Math.round((j.done / j.total) * 100)}%` : '0';
 }
 
@@ -290,6 +318,29 @@ $('run').onclick = async () => {
   if (!S.settings.adsProfile) return toast('Выберите профиль AdsPower (кнопка ⟳)');
   $('log').textContent = '';
   await api('/api/run', {});
+};
+$('watch').onclick = async () => {
+  await saveSettings();
+  if (!S.tracked.length) return toast('Добавьте хотя бы один референс');
+  if (!S.settings.adsProfile) return toast('Выберите профиль AdsPower (кнопка ⟳)');
+  $('log').textContent = '';
+  await api('/api/run', { mode: 'watch' });
+};
+$('postText').oninput = () => ($('postCount').textContent = `${[...$('postText').value].length} / 500`);
+$('postSend').onclick = async () => {
+  const text = $('postText').value.trim();
+  if (!text) return toast('Напишите текст поста');
+  if (!confirm('Опубликовать этот пост в Threads от имени аккаунта из выбранного профиля AdsPower?')) return;
+  await saveSettings();
+  const file = $('postImage').files[0];
+  let image;
+  if (file) {
+    if (file.size > 8e6) return toast('Картинка больше 8 МБ');
+    image = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(file); });
+  }
+  $('log').textContent = '';
+  await api('/api/post', { text, image });
+  $('postText').value = ''; $('postImage').value = ''; $('postCount').textContent = '';
 };
 $('stop').onclick = () => api('/api/stop', {});
 
