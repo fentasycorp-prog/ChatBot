@@ -35,6 +35,8 @@ function filterReason(acc, s) {
   const m = acc.metrics || {};
   if (acc.private) return 'закрытый профиль';
   if ((acc.followers ?? 0) < s.minFollowers) return `мало подписчиков (${acc.followers ?? '?'})`;
+  if (s.requireLink && !(acc.links || []).length) return 'нет ссылки в профиле';
+  if (m.avgLikes < s.minAvgLikes) return `мало лайков (${m.avgLikes} в среднем)`;
   if (m.postsPerWeek < s.minPostsPerWeek) return `редко постит (${m.postsPerWeek}/нед)`;
   if (m.avgReplies < s.minAvgReplies) return `мало комментариев (${m.avgReplies} в среднем)`;
   if (s.englishOnly && m.english === false) return 'посты не на английском';
@@ -63,6 +65,23 @@ async function openSession(s, check) {
 export const tracked = (db) => [...new Set([...db.seeds,
   ...Object.values(db.accounts).filter((a) => a.status === 'approved' && a.role !== 'seed').map((a) => a.username)])];
 
+// Scouts: mass commenters we do not copy, only read — their Replies tab points at threads where the niche gathers.
+export const scouts = (db) => Object.values(db.accounts).filter((a) => a.role === 'scout' && !a.dead).map((a) => a.username);
+
+// Keep a tracked author's own posts so new ones stand out on the next run.
+function mergePosts(acc, posts) {
+  const known = new Map((acc.posts || []).map((p) => [p.code, p]));
+  let added = 0;
+  for (const p of posts) {
+    if (!p.code || p.isReply) continue;
+    if (!known.has(p.code)) added++;
+    known.set(p.code, { code: p.code, text: p.text.slice(0, 280), likes: p.likes, replies: p.replies, takenAt: p.takenAt, seenAt: known.get(p.code)?.seenAt || new Date().toISOString() });
+  }
+  acc.posts = [...known.values()].sort((a, b) => (b.takenAt || 0) - (a.takenAt || 0)).slice(0, 60);
+  acc.lastPostCode = acc.posts[0]?.code || null;
+  return added;
+}
+
 // Add newly seen comments to an author's history; returns how many were new.
 function mergeComments(acc, list) {
   const known = new Map((acc.comments || []).map((c) => [c.code, c]));
@@ -85,8 +104,8 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
   const log = (msg, level = 'info') => emit('log', { t: new Date().toISOString(), level, msg });
   const progress = (phase, done, total) => emit('progress', { phase, done, total });
   const check = () => { if (isStopped()) throw new Stop(); };
-  const stats = { mode, seeds: 0, commenters: 0, scanned: 0, evaluated: 0, found: 0, newComments: 0 };
-  if (!tracked(db).length) throw new Error('Добавьте хотя бы один референсный аккаунт');
+  const stats = { mode, seeds: 0, commenters: 0, scanned: 0, evaluated: 0, found: 0, newComments: 0, newPosts: 0, newScouts: 0 };
+  if (!tracked(db).length && !scouts(db).length) throw new Error('Добавьте хотя бы один референсный аккаунт');
 
   log('Открываю профиль AdsPower…');
   const session = await openSession(s, check);
@@ -125,6 +144,7 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
     acc.femaleName = femaleNameHint(acc.fullName, name);
     acc.funnel = funnel(acc.links, acc.bio);
     acc.score = score(acc);
+    if (acc.role === 'seed' || acc.status === 'approved') stats.newPosts += mergePosts(acc, r.posts);
     if (u.pic && u.pic !== prev.picUrl) {
       const buf = await t.avatar(u.pic);
       if (buf) {
@@ -140,17 +160,25 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
 
   // Read what tracked authors comment and where. refresh(u) says whether to reload the profile card too.
   const watch = async (refresh) => {
-    const list = tracked(db);
+    const authors = new Set(tracked(db));
+    const list = [...authors, ...scouts(db).filter((u) => !authors.has(u))];
     let n = 0;
     for (const u of list) {
       progress('Комментинг авторов', n++, list.length);
-      if (refresh(u)) {
+      if (authors.has(u) && refresh(u)) {
         const r = await step(`@${u}`, () => t.profile(u, { scrolls: s.profileScrolls }));
         if (r?.found) await saveCard(u, r, {});
       }
       if (!db.accounts[u]) continue;
-      const list2 = await step(`комментарии @${u}`, () => t.comments(u, { scrolls: s.commentScrolls }));
-      if (!list2) continue;
+      const res = await step(`комментарии @${u}`, () => t.comments(u, { scrolls: s.commentScrolls }));
+      if (!res) continue;
+      const list2 = res.list;
+      if (!authors.has(u)) {
+        // A scout that stopped returning anything twice in a row is banned or deleted.
+        const acc = db.accounts[u];
+        acc.misses = res.found || list2.length ? 0 : (acc.misses || 0) + 1;
+        if (acc.misses >= 2) { acc.dead = true; log(`@${u}: ищейка больше не отвечает — помечена как выбывшая`, 'warn'); save(); continue; }
+      }
       const added = mergeComments(db.accounts[u], list2);
       stats.newComments += added;
       const top = db.accounts[u].commentStats.targets.slice(0, 3).map((x) => `@${x.to}`).join(', ');
@@ -165,7 +193,7 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
     if (!(await t.loggedIn())) log('Похоже, в профиле не выполнен вход в Threads: списки подписок могут не открыться.', 'warn');
     if (mode === 'watch') {
       await watch(() => true);
-      log(`Слежение обновлено. Авторов: ${tracked(db).length}, новых комментариев: ${stats.newComments}`);
+      log(`Слежение обновлено. Авторов: ${tracked(db).length}, ищеек: ${scouts(db).length}, новых постов: ${stats.newPosts}, новых комментариев: ${stats.newComments}`);
       return stats;
     }
 
@@ -231,6 +259,27 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
     progress('Аудитория', queue.length, queue.length);
     save();
 
+    // 2b. The busiest commenters: if one comments in bulk, keep it as a scout.
+    const suspects = [...pool.entries()]
+      .filter(([u]) => !seedSet.has(u) && !db.accounts[u])
+      .sort((a, b) => b[1].comments - a[1].comments || b[1].seeds.size - a[1].seeds.size)
+      .slice(0, s.scoutChecks);
+    i = 0;
+    for (const [u] of suspects) {
+      progress('Поиск ищеек', i++, suspects.length);
+      const res = await step(`комментарии @${u}`, () => t.comments(u, { scrolls: s.commentScrolls }));
+      if (!res) continue;
+      const cs = commentStats(res.list);
+      if (cs.perDay < s.scoutMinPerDay) continue;
+      db.accounts[u] = { username: u, role: 'scout', status: 'scout', foundAt: new Date().toISOString(),
+        fullName: res.user.full_name || '', bio: res.user.bio || '', links: res.user.links || [], followers: res.user.followers ?? null };
+      db.accounts[u].funnel = funnel(db.accounts[u].links, db.accounts[u].bio);
+      mergeComments(db.accounts[u], res.list);
+      stats.newScouts++;
+      log(`@${u}: массовый комментатор (${cs.perDay} в день) — добавлен в ищейки`);
+    }
+    if (suspects.length) { progress('Поиск ищеек', suspects.length, suspects.length); save(); }
+
     // 3. Optional keyword search as one more source.
     for (const kw of s.keywords) {
       const r = await step(`поиск «${kw}»`, () => t.search(kw, { scrolls: s.profileScrolls }));
@@ -240,19 +289,20 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
     }
 
     // 4. Accounts under whose posts tracked authors comment: creators promote themselves next to bigger ones.
-    const trackedSet = new Set(tracked(db));
+    const trackedSet = new Set([...tracked(db), ...Object.values(db.accounts).filter((a) => a.role === 'scout').map((a) => a.username)]);
     const targets = new Map();
     for (const u of trackedSet) {
       for (const c of db.accounts[u]?.comments || []) {
         if (!c.to || trackedSet.has(c.to)) continue;
-        const x = targets.get(c.to) || { authors: new Set(), n: 0 };
+        const x = targets.get(c.to) || { authors: new Set(), n: 0, scoutN: 0 };
+        if (db.accounts[u].role === 'scout') x.scoutN++;
         x.authors.add(u);
         x.n++;
         targets.set(c.to, x);
       }
     }
     for (const [u, x] of targets) {
-      if (db.accounts[u]) db.accounts[u].commentedBy = [...x.authors];
+      if (db.accounts[u]) Object.assign(db.accounts[u], { commentedBy: [...x.authors], scoutComments: x.scoutN });
       if ((x.authors.size >= 2 || x.n >= 3) && !extra.has(u)) extra.set(u, `у неё комментируют: ${[...x.authors].map((a) => `@${a}`).join(', ')}`);
     }
 
@@ -278,7 +328,7 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
       if (!r || !r.found) continue;
       const acc = await saveCard(u, r, {
         role: 'candidate', overlap: c.overlap, followedBy: c.by, sources: [...c.sources], via: extra.get(u) || null,
-        commentedBy: [...(targets.get(u)?.authors || [])],
+        commentedBy: [...(targets.get(u)?.authors || [])], scoutComments: targets.get(u)?.scoutN || 0,
       });
       const reason = filterReason(acc, s);
       if (acc.status === 'new' || acc.status === 'filtered') acc.status = reason ? 'filtered' : 'new';
@@ -289,7 +339,7 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
       if (i % 3 === 0) { save(); emit('change', {}); }
     }
     progress('Кандидаты', todo.length, todo.length);
-    log(`Готово. Новых комментариев авторов: ${stats.newComments}. Референсов: ${stats.seeds}, комментаторов: ${stats.commenters}, просмотрено подписок: ${stats.scanned}, проверено кандидатов: ${stats.evaluated}, подходящих: ${stats.found}`);
+    log(`Готово. Новых ищеек: ${stats.newScouts}, новых постов авторов: ${stats.newPosts}, новых комментариев: ${stats.newComments}. Референсов: ${stats.seeds}, комментаторов: ${stats.commenters}, просмотрено подписок: ${stats.scanned}, проверено кандидатов: ${stats.evaluated}, подходящих: ${stats.found}`);
     return stats;
   } finally {
     db.lastRun = { at: new Date().toISOString(), ...stats };

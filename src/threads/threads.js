@@ -114,7 +114,7 @@ export class Threads {
       .map((p) => ({ username: p.username, text: p.text, likes: p.likes }));
   }
 
-  // Comments the user left under other people's posts (the "Replies" tab): [{ code, text, to, takenAt, likes, replies }]
+  // Comments the user left under other people's posts (the "Replies" tab): { list: [{ code, text, to, takenAt, likes, replies }], found, user }
   async comments(username, { scrolls = 3 } = {}) {
     const name = normName(username);
     await this.goto(`/@${name}/replies`);
@@ -126,7 +126,8 @@ export class Threads {
       if (!(p.isReply || to) || to === name) continue;
       out.push({ code: p.code, text: p.text.slice(0, 400), to, takenAt: p.takenAt, likes: p.likes, replies: p.replies });
     }
-    return out;
+    const own = [...this.bag.posts.values()].filter((p) => p.username === name && !p.embedded).length;
+    return { list: out, found: this.bag.users.has(name) || own > 0, user: { username: name, ...this.bag.users.get(name) } };
   }
 
   // Accounts a user follows. Returns { user, following: [username] } or following: null when the list is hidden.

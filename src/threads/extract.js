@@ -136,6 +136,12 @@ export function isEnglish(text) {
 const avg = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 const DAY = 86400;
 
+function topHours(dated) {
+  const byHour = new Map();
+  for (const p of dated) { const h = new Date(p.takenAt * 1000).getUTCHours(); byHour.set(h, (byHour.get(h) || 0) + 1); }
+  return [...byHour.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, 3).map(([h]) => h);
+}
+
 // Activity and engagement from the account's own (non-reply) posts.
 export function metrics(posts, followers, nowSec = Date.now() / 1000) {
   const own = posts.filter((p) => !p.isReply && !p.embedded);
@@ -155,6 +161,10 @@ export function metrics(posts, followers, nowSec = Date.now() / 1000) {
     avgReposts: Math.round(avg(base.map((p) => (p.reposts || 0) + (p.quotes || 0))) * 10) / 10,
     lastPostAt: dated[0]?.takenAt || null,
     english: isEnglish(base.map((p) => p.text).join(' . ')),
+    posts30d: recent.length,
+    // Rhythm: typical gap between posts and the UTC hours she usually posts at.
+    avgIntervalH: recent.length >= 2 ? Math.round(((recent[0].takenAt - recent.at(-1).takenAt) / (recent.length - 1) / 3600) * 10) / 10 : null,
+    activeHours: topHours(dated),
   };
   m.engagementRate = followers ? Math.round(((m.avgLikes + m.avgReplies + m.avgReposts) / followers) * 10000) / 100 : null;
   return m;
@@ -217,7 +227,9 @@ export function commentStats(comments, nowSec = Date.now() / 1000) {
   for (const c of comments) if (c.to) targets.set(c.to, (targets.get(c.to) || 0) + 1);
   return {
     total: comments.length,
-    perDay: Math.round((week.length / 7) * 10) / 10,
+    // Over the span the week's comments actually cover, so a short loaded history is not diluted to 7 days.
+    perDay: Math.round((week.length >= 3
+      ? week.length / Math.max(0.5, (nowSec - Math.min(...week.map((c) => c.takenAt))) / DAY) : week.length / 7) * 10) / 10,
     // Share of comments whose text repeats word for word: a sign of templated commenting.
     templated: texts.length >= 4 ? Math.round((texts.filter((x) => seen.get(x) >= 2).length / texts.length) * 100) : null,
     cta: comments.length ? Math.round((comments.filter((c) => CTA.test(c.text || '')).length / comments.length) * 100) : null,

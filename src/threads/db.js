@@ -29,6 +29,10 @@ export const SETTING_SPEC = {
   minFollowers: [3000, 0, 1e8],
   minPostsPerWeek: [3, 0, 500],
   minAvgReplies: [5, 0, 1e6],
+  minAvgLikes: [50, 0, 1e8],
+  requireLink: false,              // only accounts with a link in the bio
+  scoutChecks: [8, 0, 100],        // most active commenters checked per run for being a mass commenter
+  scoutMinPerDay: [8, 1, 1000],    // comments a day that make a commenter a scout
   delayMin: [2500, 0, 60000],      // pause between actions, ms
   delayMax: [6000, 0, 120000],
   rescanDays: [30, 0, 365],        // do not reopen the same commenter sooner than this

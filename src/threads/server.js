@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { load, save, cleanSettings, AVATARS, DIR } from './db.js';
 import { AdsPower } from './adspower.js';
 import os from 'node:os';
-import { crawl, publish, Stop, tracked } from './crawler.js';
+import { crawl, publish, Stop, tracked, scouts } from './crawler.js';
 import { normName } from './extract.js';
 
 const PORT = Number(process.env.THREADS_PORT || 4330);
@@ -50,12 +50,17 @@ function state() {
   return {
     settings: { ...settings, hasKey: Boolean(adsKey) },
     seeds: db.seeds,
-    accounts: Object.values(db.accounts).map(({ comments, ...a }) => a),
+    accounts: Object.values(db.accounts).map(({ comments, posts, ...a }) => a),
+    scouts: scouts(db),
+    // Own posts of references and approved authors, newest first.
+    newPosts: Object.values(db.accounts).flatMap((a) => (a.posts || []).map((p) => ({ ...p, by: a.username })))
+      .sort((x, y) => (y.takenAt || 0) - (x.takenAt || 0)).slice(0, 120)
+      .map((p) => ({ ...p, fresh: Boolean(db.lastRun && p.seenAt && Date.parse(db.lastRun.at) - Date.parse(p.seenAt) < 3600e3) })),
     tracked: tracked(db),
     // Latest comments of tracked authors, newest first.
     feed: Object.values(db.accounts).flatMap((a) => (a.comments || []).map((c) => ({ ...c, by: a.username })))
-      .sort((x, y) => (y.takenAt || 0) - (x.takenAt || 0)).slice(0, 200)
-      .map((c) => ({ ...c, fresh: Boolean(db.lastRun && c.seenAt && Date.parse(db.lastRun.at) - Date.parse(c.seenAt) < 3600e3) })),
+      .sort((x, y) => (y.takenAt || 0) - (x.takenAt || 0)).slice(0, 300)
+      .map((c) => ({ ...c, scout: db.accounts[c.by]?.role === 'scout', fresh: Boolean(db.lastRun && c.seenAt && Date.parse(db.lastRun.at) - Date.parse(c.seenAt) < 3600e3) })),
     audienceScanned: Object.values(db.audience).filter((a) => !a.hidden).length,
     lastRun: db.lastRun,
     posts: (db.posts || []).slice(0, 20),
@@ -71,12 +76,13 @@ const csvCell = (v) => {
 };
 
 function csv(db) {
-  const rows = [['username', 'url', 'name', 'status', 'score', 'followers', 'posts_per_week', 'avg_likes', 'avg_replies', 'engagement_%', 'overlap', 'last_post', 'comments_per_day', 'repeated_comments_%', 'comments_at', 'funnel', 'links', 'bio']];
+  const rows = [['username', 'url', 'name', 'status', 'score', 'followers', 'posts_per_week', 'avg_likes', 'avg_replies', 'engagement_%', 'overlap', 'last_post', 'posts_30d', 'post_interval_h', 'active_hours_utc', 'scout_comments', 'comments_per_day', 'repeated_comments_%', 'comments_at', 'funnel', 'links', 'bio']];
   for (const a of Object.values(db.accounts).sort((x, y) => (y.score || 0) - (x.score || 0))) {
-    if (a.status === 'filtered' || a.status === 'rejected') continue;
+    if (a.status === 'filtered' || a.status === 'rejected' || a.role === 'scout') continue;
     const m = a.metrics || {};
     rows.push([a.username, `${db.settings.threadsBase}/@${a.username}`, a.fullName, a.role === 'seed' ? 'reference' : a.status, a.score, a.followers,
       m.postsPerWeek, m.avgLikes, m.avgReplies, m.engagementRate, a.overlap ?? '', m.lastPostAt ? new Date(m.lastPostAt * 1000).toISOString().slice(0, 10) : '',
+      m.posts30d ?? '', m.avgIntervalH ?? '', (m.activeHours || []).join(' '), a.scoutComments ?? '',
       a.commentStats?.perDay ?? '', a.commentStats?.templated ?? '', (a.commentStats?.targets || []).map((x) => `${x.to}:${x.count}`).join(' '),
       (a.funnel || []).join(' > '), (a.links || []).join(' '), a.bio]);
   }
@@ -125,6 +131,16 @@ const server = http.createServer(async (req, res) => {
       const ads = new AdsPower(db.settings.adsUrl, db.settings.adsKey);
       await ads.status();
       return json(res, 200, { profiles: await ads.profiles() });
+    }
+    if (url.pathname === '/api/seeds' && args.kind === 'scout') {
+      for (const raw of args.add || []) {
+        const u = normName(raw);
+        if (!/^[a-z0-9_.]{1,30}$/.test(u) || db.seeds.includes(u)) continue;
+        db.accounts[u] = { foundAt: new Date().toISOString(), ...db.accounts[u], username: u, role: 'scout', status: 'scout', dead: false, misses: 0 };
+      }
+      for (const raw of args.remove || []) { const u = normName(raw); if (db.accounts[u]?.role === 'scout') delete db.accounts[u]; }
+      save();
+      return json(res, 200, state());
     }
     if (url.pathname === '/api/seeds') {
       for (const raw of args.add || []) {
@@ -181,7 +197,7 @@ const server = http.createServer(async (req, res) => {
 setInterval(() => {
   const db = load();
   const h = db.settings.autoHours;
-  if (!h || job.running || !db.settings.adsProfile || !tracked(db).length) return;
+  if (!h || job.running || !db.settings.adsProfile || !(tracked(db).length + scouts(db).length)) return;
   if (db.lastWatchAt && Date.now() - Date.parse(db.lastWatchAt) < h * 3600e3) return;
   db.lastWatchAt = new Date().toISOString();   // a failed attempt waits for the next slot instead of retrying every minute
   save();

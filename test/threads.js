@@ -57,6 +57,9 @@ const USERS = {
     posts: [...Array(9)].map((_, i) => post('lola', `L${i}`, 4 + i * 14, 2000, 120, 'tell me what you think of this and be honest with me')) },
   lisa: { full_name: 'Lisa Thompson', follower_count: 40000, posts: [post('lisa', 'I1', 24 * 20, 300, 40, 'it has been a while, I know')] },
   bob: { full_name: 'Bob', follower_count: 120, posts: [] },
+  spam_bot: { full_name: 'hot girl', follower_count: 3, bio_links: [{ url: 'https://beacons.ai/x' }] },
+  kelly_hot: { full_name: 'Kelly', follower_count: 70000, bio_links: [{ url: 'https://example.com/k' }],
+    posts: [...Array(8)].map((_, i) => post('kelly_hot', `K${i}`, 2 + i * 9, 800, 60, 'I do not know what to do with my day, tell me')) },
   megan_big: { full_name: 'Megan', follower_count: 500000, biography: 'all my links below', bio_links: [{ url: 'https://linktr.ee/megan' }],
     posts: [...Array(8)].map((_, i) => post('megan_big', `M${i}`, 3 + i * 10, 9000, 400, 'what do you all think about this, tell me in the replies')) },
   bigfan: { full_name: 'Big Fan', follower_count: 50000, posts: [post('bigfan', 'B1', 24 * 50, 3, 0, 'that is all I have to say')] },
@@ -65,8 +68,8 @@ const USERS = {
 };
 const FOLLOWING = { fan1: ['lola', 'lisa', 'bob'], fan2: ['lola', 'lisa'], fan3: ['lola', 'bob'], bigfan: ['lola'] };
 const REPLIES = { S1: [['fan1', 'you are the best, I love this so much'], ['fan2', 'what a great picture, you look so good in it'],
-  ['fan_ru', 'очень красивая фотография, мне нравится'], ['bigfan', 'this is what I like to see on my feed']],
-  S2: [['fan1', 'the weather is not that bad if you ask me'], ['fan3', 'I think it is so nice that you are here']] };
+  ['fan_ru', 'очень красивая фотография, мне нравится'], ['bigfan', 'this is what I like to see on my feed'], ['spam_bot', 'you are so pretty, check my bio']],
+  S2: [['spam_bot', 'you are so pretty, check my bio'], ['fan1', 'the weather is not that bad if you ask me'], ['fan3', 'I think it is so nice that you are here']] };
 
 // skye's Replies tab: three comments under megan_big (two with the same text), one under lola without reply_to_author.
 const SKYE_REPLIES = [
@@ -75,6 +78,9 @@ const SKYE_REPLIES = [
   [post('megan_big', 'M2', 23, 9000, 400, 'x'), post('skye', 'C3', 22, 9, 1, 'this is what I needed today', { is_reply: true, reply_to_author: { username: 'megan_big' } })],
   [post('lola', 'L0', 4, 2000, 120, 'x'), post('skye', 'C4', 3, 2, 0, 'so true, I think that all the time')],
 ];
+// spam_bot comments in bulk, mostly under kelly_hot.
+const BOT_REPLIES = [...Array(12)].map((_, i) => [post(i % 4 ? 'kelly_hot' : 'megan_big', `X${i}`, 5, 1, 1, 'x'),
+  post('spam_bot', `BC${i}`, 1 + i, 0, 0, 'you are so pretty, check my bio', { is_reply: true, reply_to_author: { username: i % 4 ? 'kelly_hot' : 'megan_big' } })]);
 const POSTED = [];
 const HOME = `<h1>home</h1><div id="open" style="cursor:pointer">What's new?</div><script>
   document.getElementById('open').onclick = () => {
@@ -118,7 +124,7 @@ const site = http.createServer((req, res) => {
   if (!seg[0]) return html(HOME);
   if (!USERS[name]) return html('<p>Sorry, this page is not available</p>');
   if (seg[1] === 'replies') {
-    return html(blob({ data: { edges: (name === 'skye' ? SKYE_REPLIES : []).map((thread_items) => ({ node: { thread_items } })) } }) + '<h1>replies</h1>');
+    return html(blob({ data: { edges: (name === 'skye' ? SKYE_REPLIES : name === 'spam_bot' ? BOT_REPLIES : []).map((thread_items) => ({ node: { thread_items } })) } }) + '<h1>replies</h1>');
   }
   if (seg[1] === 'post') {
     const own = USERS[name].posts.find((p) => p.post.code === seg[2]);
@@ -215,18 +221,28 @@ try {
     assert.equal(acc.bigfan.status, 'filtered');
     assert.match(acc.bigfan.via, /комментатор/);
     assert.equal(acc.bob.status, 'filtered', 'bob: пересечение 2, но мало подписчиков');
-    for (const no of ['fan_ru', 'quoted_guy', 'some_follower', 'fan1', 'nobody_here']) assert.equal(acc[no], undefined, `${no} не должен попасть в кандидаты`);
-    assert.equal(st.audienceScanned, 4);
-    assert.equal(st.lastRun.found, 2);
+    for (const no of ['fan_ru', 'quoted_guy', 'some_follower', 'nobody_here']) assert.equal(acc[no], undefined, `${no} не должен попасть в кандидаты`);
+    assert.equal(st.audienceScanned, 5);
+    assert.equal(st.lastRun.found, 3);
+    assert.equal(acc.spam_bot.role, 'scout', 'массовый комментатор должен стать ищейкой');
+    assert.ok(acc.spam_bot.commentStats.perDay >= 8 && acc.spam_bot.commentStats.templated === 100, JSON.stringify(acc.spam_bot.commentStats));
+    assert.equal(acc.fan1, undefined);
+    assert.equal(acc.kelly_hot.status, 'new');
+    assert.match(acc.kelly_hot.via, /комментируют: @spam_bot/);
+    assert.equal(acc.kelly_hot.scoutComments, 9);
+    assert.equal(acc.megan_big.scoutComments, 3);
+    assert.ok(acc.kelly_hot.metrics.posts30d === 8 && acc.kelly_hot.metrics.avgIntervalH === 9 && acc.kelly_hot.metrics.activeHours.length, JSON.stringify(acc.kelly_hot.metrics));
+    assert.equal(st.newPosts.filter((p) => p.by === 'skye').length, 3);
+    assert.equal(st.lastRun.newScouts, 1);
     assert.equal(acc.megan_big.status, 'new');
     assert.match(acc.megan_big.via, /комментируют: @skye/);
-    assert.deepEqual(acc.megan_big.commentedBy, ['skye']);
+    assert.deepEqual(acc.megan_big.commentedBy, ['skye', 'spam_bot']);
     assert.deepEqual(acc.megan_big.funnel, ['мультиссылка']);
     assert.deepEqual(acc.skye.commentStats.targets[0], { to: 'megan_big', count: 3 });
     assert.equal(acc.skye.commentStats.templated, 50);
     assert.equal(acc.skye.commentStats.cta, 50);
     assert.equal(acc.skye.comments, undefined, 'история комментариев отдаётся только лентой');
-    assert.equal(st.feed.length, 4);
+    assert.equal(st.feed.length, 16);
     assert.equal(st.feed.find((c) => c.code === 'C4').to, 'lola', 'адресат по порядку в ветке');
     assert.equal(st.lastRun.newComments, 4);
     assert.equal(started, 1);
@@ -250,7 +266,13 @@ try {
   assert.deepEqual(st.tracked, ['skye', 'nobody_here', 'lola']);
   assert.equal(st.lastRun.mode, 'watch');
   assert.equal(st.lastRun.newComments, 0, 'те же комментарии не считаются новыми дважды');
-  assert.equal(st.feed.length, 4);
+  assert.equal(st.feed.length, 16);
+  assert.deepEqual(st.scouts, ['spam_bot']);
+  st = await call('/api/seeds', { kind: 'scout', add: ['@gone_bot'] });
+  await call('/api/run', { mode: 'watch' }); await wait();
+  await call('/api/run', { mode: 'watch' }); out = await wait();
+  assert.equal(st.accounts.find((a) => a.username === 'gone_bot').dead, true, out);
+  assert.deepEqual(st.scouts, ['spam_bot']);
   console.log('✓ слежение: повторный сбор комментариев без дублей');
 
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';

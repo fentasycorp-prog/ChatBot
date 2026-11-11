@@ -77,9 +77,9 @@
     <div class="panel">
       <h2>Референсы</h2>
       <textarea id="seedInput" placeholder="@username или ссылки на профили, по одному в строке"></textarea>
-      <div class="row" style="margin-top:8px"><button id="seedAdd">Добавить</button></div>
+      <div class="row" style="margin-top:8px"><button id="seedAdd">Добавить</button><select id="seedKind" style="width:auto"><option value="seed">как референс</option><option value="scout">как ищейку</option></select></div>
       <div class="chips" id="seeds"></div>
-      <div class="hint">От этих аккаунтов парсер идёт к их комментаторам и смотрит, на кого те подписаны.</div>
+      <div class="hint">От референсов парсер идёт к их комментаторам и смотрит, на кого те подписаны. Ищейки — массовые комментаторы: по их ответам видно, под чьими постами собирается ниша.</div>
     </div>
 
     <div class="panel">
@@ -108,14 +108,18 @@
         <div><label>Постов в неделю от</label><input id="minPostsPerWeek" type="number" min="0" step="0.5"></div>
         <div><label>Комментариев на пост от</label><input id="minAvgReplies" type="number" min="0"></div>
         <div><label>Пересечение аудитории от</label><input id="minOverlap" type="number" min="1"></div>
+        <div><label>Лайков на пост от</label><input id="minAvgLikes" type="number" min="0"></div>
       </div>
       <label class="row" style="color:var(--text)"><input type="checkbox" id="englishOnly" style="width:auto"> Только англоязычные посты и комментаторы</label>
+      <label class="row" style="color:var(--text)"><input type="checkbox" id="requireLink" style="width:auto"> Только со ссылкой в профиле</label>
       <details style="margin-top:10px"><summary>Объём и скорость одного запуска</summary>
         <div class="grid2">
           <div><label>Постов у референса</label><input id="postsPerSeed" type="number" min="1"></div>
           <div><label>Комментаторов с поста</label><input id="commentersPerPost" type="number" min="1"></div>
           <div><label>Открыть подписок (людей)</label><input id="maxAudience" type="number" min="1"></div>
           <div><label>Проверить кандидатов</label><input id="maxCandidates" type="number" min="1"></div>
+          <div><label>Проверить на ищейку (людей)</label><input id="scoutChecks" type="number" min="0"></div>
+          <div><label>Ищейка: комментариев в день от</label><input id="scoutMinPerDay" type="number" min="1"></div>
           <div><label>Пауза от, мс</label><input id="delayMin" type="number" min="0" step="100"></div>
           <div><label>Пауза до, мс</label><input id="delayMax" type="number" min="0" step="100"></div>
         </div>
@@ -137,8 +141,8 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const NUM_FIELDS = ['minFollowers', 'minPostsPerWeek', 'minAvgReplies', 'minOverlap', 'postsPerSeed', 'commentersPerPost', 'maxAudience', 'maxCandidates', 'delayMin', 'delayMax', 'autoHours'];
-const TABS = [['new', 'Найденные'], ['approved', 'База авторов'], ['feed', 'Комментинг'], ['seed', 'Референсы'], ['rejected', 'Отклонённые'], ['filtered', 'Отсеянные']];
+const NUM_FIELDS = ['minFollowers', 'minPostsPerWeek', 'minAvgReplies', 'minOverlap', 'postsPerSeed', 'commentersPerPost', 'maxAudience', 'maxCandidates', 'delayMin', 'delayMax', 'autoHours', 'minAvgLikes', 'scoutChecks', 'scoutMinPerDay'];
+const TABS = [['new', 'Найденные'], ['approved', 'База авторов'], ['posts', 'Новые посты'], ['feed', 'Комментинг'], ['scout', 'Ищейки'], ['seed', 'Референсы'], ['rejected', 'Отклонённые'], ['filtered', 'Отсеянные']];
 let S = null, tab = 'new', sort = 'score', settingsDirty = false;
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = 'none'), 6000); }
@@ -156,7 +160,7 @@ function ago(sec) {
   const d = Math.floor((Date.now() / 1000 - sec) / 86400);
   return d <= 0 ? 'сегодня' : d === 1 ? 'вчера' : `${d} дн. назад`;
 }
-const bucket = (a) => (a.role === 'seed' ? 'seed' : a.status);
+const bucket = (a) => (a.role === 'seed' ? 'seed' : a.role === 'scout' ? 'scout' : a.status);
 
 function fillSettings() {
   const s = S.settings;
@@ -165,6 +169,7 @@ function fillSettings() {
   $('adsKey').placeholder = s.hasKey ? 'сохранён' : '';
   $('closeBrowser').checked = s.closeBrowser;
   $('englishOnly').checked = s.englishOnly;
+  $('requireLink').checked = s.requireLink;
   $('keywords').value = s.keywords.join(', ');
   const sel = $('adsProfile');
   if (![...sel.options].some((o) => o.value === s.adsProfile)) {
@@ -175,7 +180,7 @@ function fillSettings() {
 
 function readSettings() {
   const out = { adsUrl: $('adsUrl').value, adsKey: $('adsKey').value, adsProfile: $('adsProfile').value,
-    closeBrowser: $('closeBrowser').checked, englishOnly: $('englishOnly').checked, keywords: $('keywords').value.split(',') };
+    closeBrowser: $('closeBrowser').checked, englishOnly: $('englishOnly').checked, requireLink: $('requireLink').checked, keywords: $('keywords').value.split(',') };
   for (const k of NUM_FIELDS) out[k] = Number($(k).value);
   return out;
 }
@@ -187,8 +192,8 @@ function card(a) {
     ? `<img class="ava" src="/avatar/${encodeURIComponent(a.avatar)}" alt="" loading="lazy">`
     : `<div class="ava">${esc(a.username[0].toUpperCase())}</div>`;
   const top = (a.topPosts || [])[0];
-  const overlap = a.role === 'seed' ? '' : `<div><b>${a.overlap ?? 0}</b> <span>из ${S.audienceScanned} комментаторов подписаны</span></div>`;
-  const acts = a.role === 'seed'
+  const overlap = a.role === 'seed' || a.role === 'scout' ? '' : `<div><b>${a.overlap ?? 0}</b> <span>из ${S.audienceScanned} комментаторов подписаны</span></div>`;
+  const acts = a.role === 'scout' ? `<button class="small danger" data-act="unscout">Убрать из ищеек</button>` : a.role === 'seed'
     ? `<button class="small danger" data-act="unseed">Убрать из референсов</button>`
     : `${a.status !== 'approved' ? '<button class="small" data-act="approved">✓ Одобрить</button>' : ''}
        <button class="small" data-act="seed">★ В референсы</button>
@@ -197,7 +202,7 @@ function card(a) {
     ${ava}
     <div>
       <div class="name"><a href="${esc(url)}" target="_blank" rel="noopener noreferrer">@${esc(a.username)}</a>${a.verified ? ' ✔' : ''}<span>${esc(a.fullName)}</span>
-        ${a.filterReason ? `<span class="tag warn">${esc(a.filterReason)}</span>` : ''}${a.via ? `<span class="tag">${esc(a.via)}</span>` : ''}</div>
+        ${a.dead ? '<span class="tag warn">не отвечает</span>' : ''}${a.filterReason ? `<span class="tag warn">${esc(a.filterReason)}</span>` : ''}${a.via ? `<span class="tag">${esc(a.via)}</span>` : ''}</div>
       <div class="bio">${esc(a.bio)}</div>
       <div class="nums">
         <div><b>${fmt(a.followers)}</b> <span>подписчиков</span></div>
@@ -205,6 +210,9 @@ function card(a) {
         <div><b>${fmt(m.avgLikes)}</b> <span>лайков</span></div>
         <div><b>${m.avgReplies ?? '—'}</b> <span>комментариев на пост</span></div>
         <div><span>последний пост:</span> <b>${ago(m.lastPostAt)}</b></div>
+        ${m.avgIntervalH != null ? `<div><span>пост каждые</span> <b>${m.avgIntervalH} ч</b></div>` : ''}
+        ${m.activeHours?.length ? `<div><span>обычно постит в</span> <b>${m.activeHours.map((h) => String(h).padStart(2, '0') + ':00').join(', ')}</b> <span>UTC</span></div>` : ''}
+        ${a.scoutComments ? `<div><b>${a.scoutComments}</b> <span>комментариев ищеек под её постами</span></div>` : ''}
         ${overlap}
       </div>
       ${a.commentStats ? `<div class="nums" style="margin-top:5px"><div><span>комментинг:</span> <b>${a.commentStats.perDay}</b> <span>в день</span></div>
@@ -215,7 +223,7 @@ function card(a) {
       ${a.sources?.length ? `<div class="hint">Аудитория от: ${a.sources.map((x) => '@' + esc(x)).join(', ')}</div>` : ''}
       ${top ? `<div class="post">${esc(top.text.slice(0, 200)) || '(пост без текста)'} · 💬 ${fmt(top.replies)} · ♥ ${fmt(top.likes)} · <a href="${esc(url)}/post/${encodeURIComponent(top.code)}" target="_blank" rel="noopener noreferrer">открыть</a></div>` : ''}
     </div>
-    <div class="acts">${a.role === 'seed' ? '' : `<div class="score">${a.score ?? 0}<small>оценка</small></div>`}${acts}</div>
+    <div class="acts">${a.role === 'seed' || a.role === 'scout' ? '' : `<div class="score">${a.score ?? 0}<small>оценка</small></div>`}${acts}</div>
   </div>`;
 }
 
@@ -223,6 +231,7 @@ function render() {
   const counts = {};
   for (const a of S.accounts) counts[bucket(a)] = (counts[bucket(a)] || 0) + 1;
   counts.feed = S.feed.length;
+  counts.posts = S.newPosts.length;
   $('tabs').innerHTML = TABS.map(([k, t]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${t} ${counts[k] || 0}</button>`).join('')
     + `<span class="sp"></span><select id="sort">
         <option value="score">По оценке</option><option value="overlap">По пересечению аудитории</option>
@@ -235,9 +244,14 @@ function render() {
   const tb = S.settings.threadsBase;
   if (tab === 'feed') $('list').innerHTML = S.feed.length ? S.feed.map((c) => `<div class="feed${c.fresh ? ' fresh' : ''}">
       <div class="who"><a href="${esc(tb)}/@${encodeURIComponent(c.by)}" target="_blank" rel="noopener noreferrer">@${esc(c.by)}</a> → ${c.to ? `<a href="${esc(tb)}/@${encodeURIComponent(c.to)}" target="_blank" rel="noopener noreferrer">@${esc(c.to)}</a>` : '?'}
-        · ${ago(c.takenAt)} · ♥ ${fmt(c.likes)}${c.fresh ? ' · <b>новый</b>' : ''} · <a href="${esc(tb)}/@${encodeURIComponent(c.by)}/post/${encodeURIComponent(c.code)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-weight:400">открыть</a></div>
+        · ${c.scout ? 'ищейка · ' : ''}${ago(c.takenAt)} · ♥ ${fmt(c.likes)}${c.fresh ? ' · <b>новый</b>' : ''} · <a href="${esc(tb)}/@${encodeURIComponent(c.by)}/post/${encodeURIComponent(c.code)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-weight:400">открыть</a></div>
       <div>${esc(c.text) || '(без текста)'}</div></div>`).join('')
     : '<div class="empty">Здесь появятся комментарии, которые авторы из базы и референсы оставляют у других. Нажмите «Обновить слежение».</div>';
+  else if (tab === 'posts') $('list').innerHTML = S.newPosts.length ? S.newPosts.map((c) => `<div class="feed${c.fresh ? ' fresh' : ''}">
+      <div class="who"><a href="${esc(tb)}/@${encodeURIComponent(c.by)}" target="_blank" rel="noopener noreferrer">@${esc(c.by)}</a>
+        · ${ago(c.takenAt)} · 💬 ${fmt(c.replies)} · ♥ ${fmt(c.likes)}${c.fresh ? ' · <b>новый</b>' : ''} · <a href="${esc(tb)}/@${encodeURIComponent(c.by)}/post/${encodeURIComponent(c.code)}" target="_blank" rel="noopener noreferrer" style="color:var(--accent);font-weight:400">открыть</a></div>
+      <div>${esc(c.text) || '(без текста)'}</div></div>`).join('')
+    : '<div class="empty">Здесь появятся посты референсов и авторов из базы. Нажмите «Обновить слежение».</div>';
   else $('list').innerHTML = rows.length ? rows.map(card).join('')
     : `<div class="empty">${tab === 'new' ? 'Пока пусто. Добавьте референсы, выберите профиль AdsPower и нажмите «Парсинг».' : 'Здесь пока ничего нет.'}</div>`;
   $('seeds').innerHTML = S.seeds.map((u) => `<span class="chip">@${esc(u)}<button data-rm="${esc(u)}" title="Убрать">×</button></span>`).join('');
@@ -281,6 +295,7 @@ $('list').addEventListener('click', async (e) => {
   if (!act) return;
   const u = e.target.closest('.card').dataset.u;
   if (act === 'seed') S = await api('/api/seeds', { add: [u] });
+  else if (act === 'unscout') S = await api('/api/seeds', { kind: 'scout', remove: [u] });
   else if (act === 'unseed') S = await api('/api/seeds', { remove: [u] });
   else S = await api(`/api/account/${encodeURIComponent(u)}`, { status: act });
   render();
@@ -289,7 +304,7 @@ $('seeds').addEventListener('click', async (e) => { if (e.target.dataset.rm) { S
 $('seedAdd').onclick = async () => {
   const add = $('seedInput').value.split(/[\s,]+/).filter(Boolean);
   if (!add.length) return;
-  S = await api('/api/seeds', { add });
+  S = await api('/api/seeds', { add, kind: $('seedKind').value });
   $('seedInput').value = '';
   render();
 };
@@ -302,7 +317,7 @@ async function saveSettings() {
   setTimeout(() => ($('saved').textContent = ''), 2000);
 }
 $('saveSettings').onclick = saveSettings;
-document.querySelectorAll('.panel input, .panel select').forEach((el) => el.addEventListener('input', () => { if (el.id !== 'seedInput') settingsDirty = true; }));
+document.querySelectorAll('.panel input, .panel select').forEach((el) => el.addEventListener('input', () => { if (!['seedInput', 'seedKind', 'postImage'].includes(el.id)) settingsDirty = true; }));
 $('adsLoad').onclick = async () => {
   await api('/api/settings', readSettings());
   const { profiles } = await api('/api/adspower/profiles', {});
@@ -314,14 +329,14 @@ $('adsLoad').onclick = async () => {
 };
 $('run').onclick = async () => {
   await saveSettings();
-  if (!S.seeds.length) return toast('Добавьте хотя бы один референс');
+  if (!S.seeds.length && !S.scouts.length) return toast('Добавьте хотя бы один референс');
   if (!S.settings.adsProfile) return toast('Выберите профиль AdsPower (кнопка ⟳)');
   $('log').textContent = '';
   await api('/api/run', {});
 };
 $('watch').onclick = async () => {
   await saveSettings();
-  if (!S.tracked.length) return toast('Добавьте хотя бы один референс');
+  if (!S.tracked.length && !S.scouts.length) return toast('Добавьте хотя бы один референс или ищейку');
   if (!S.settings.adsProfile) return toast('Выберите профиль AdsPower (кнопка ⟳)');
   $('log').textContent = '';
   await api('/api/run', { mode: 'watch' });
