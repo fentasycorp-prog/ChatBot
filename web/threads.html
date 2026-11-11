@@ -209,7 +209,7 @@ function card(a) {
     ? `<img class="ava" src="/avatar/${encodeURIComponent(a.avatar)}" alt="" loading="lazy">`
     : `<div class="ava">${esc(a.username[0].toUpperCase())}</div>`;
   const top = (a.topPosts || [])[0];
-  const overlap = a.role === 'seed' || a.role === 'scout' ? '' : `<div><b>${a.overlap ?? 0}</b> <span>из ${S.audienceScanned} комментаторов подписаны</span></div>`;
+  const overlap = a.role === 'seed' || a.role === 'scout' || (!a.overlap && a.commentedBy?.length) ? '' : `<div><b>${a.overlap ?? 0}</b> <span>из ${S.audienceScanned} комментаторов подписаны</span></div>`;
   const acts = a.role === 'scout' ? `<button class="small danger" data-act="unscout">Убрать из ищеек</button>` : a.role === 'seed'
     ? `<button class="small danger" data-act="unseed">Убрать из референсов</button>`
     : `${a.status !== 'approved' ? '<button class="small" data-act="approved">✓ Одобрить</button>' : ''}
@@ -236,7 +236,7 @@ function card(a) {
         ${a.commentStats.templated != null ? `<div><b>${a.commentStats.templated}%</b> <span>повторяющихся текстов</span></div>` : ''}
         ${a.commentStats.targets.length ? `<div><span>чаще всего у:</span> ${a.commentStats.targets.slice(0, 4).map((x) => `@${esc(x.to)} ×${x.count}`).join(', ')}</div>` : ''}</div>` : ''}
       ${a.funnel?.length ? `<div class="hint">Воронка: ${a.funnel.map(esc).join(' → ')}${(a.links || []).length ? ' · ' + a.links.slice(0, 3).map(esc).join(' , ') : ''}</div>` : ''}
-      ${a.commentedBy?.length ? `<div class="hint">У неё комментируют: ${a.commentedBy.map((x) => '@' + esc(x)).join(', ')}</div>` : ''}
+      ${a.commentedBy?.length && !/комментируют/.test(a.via || '') ? `<div class="hint">У неё комментируют: ${a.commentedBy.map((x) => '@' + esc(x)).join(', ')}</div>` : ''}
       ${a.sources?.length ? `<div class="hint">Аудитория от: ${a.sources.map((x) => '@' + esc(x)).join(', ')}</div>` : ''}
       ${top ? `<div class="post">${esc(top.text.slice(0, 200)) || '(пост без текста)'} · 💬 ${fmt(top.replies)} · ♥ ${fmt(top.likes)} · <a href="${esc(url)}/post/${encodeURIComponent(top.code)}" target="_blank" rel="noopener noreferrer">открыть</a></div>` : ''}
     </div>

@@ -161,7 +161,9 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
 
   // Read what tracked authors comment and where. refresh(u) says whether to reload the profile card too.
   const watch = async (refresh) => {
-    const authors = new Set(tracked(db));
+    // Authors added by following scouts are watched for new posts only (on-duty mode); re-reading
+    // every one of them here would make a base of hundreds take hours.
+    const authors = new Set(tracked(db).filter((u) => !db.accounts[u]?.auto));
     const list = [...authors, ...scouts(db).filter((u) => !authors.has(u))];
     let n = 0;
     for (const u of list) {
