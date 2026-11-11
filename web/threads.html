@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Парсер Threads</title>
+<style>
+  :root { --bg:#0f1114; --panel:#171a1f; --panel2:#1e2228; --line:#2a2f37; --text:#e8eaed; --dim:#8b93a1; --accent:#7c9cff; --ok:#4cc38a; --bad:#ef6a6a; --warn:#e5b454; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display:flex; align-items:center; gap:14px; padding:12px 18px; border-bottom:1px solid var(--line); position:sticky; top:0; background:var(--bg); z-index:5; flex-wrap:wrap; }
+  h1 { font-size:16px; margin:0; font-weight:600; }
+  h2 { font-size:12px; margin:0 0 10px; color:var(--dim); font-weight:600; text-transform:uppercase; letter-spacing:.06em; }
+  button { font:inherit; color:var(--text); background:var(--panel2); border:1px solid var(--line); border-radius:8px; padding:7px 12px; cursor:pointer; }
+  button:hover { border-color:#3b424d; }
+  button:disabled { opacity:.5; cursor:default; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#0b1020; font-weight:600; }
+  button.danger { color:var(--bad); }
+  button.small { padding:4px 9px; font-size:13px; }
+  input, select, textarea { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:7px 9px; width:100%; }
+  textarea { resize:vertical; min-height:62px; }
+  label { display:block; font-size:12px; color:var(--dim); margin:9px 0 3px; }
+  .layout { display:grid; grid-template-columns:330px minmax(0,1fr); gap:16px; padding:16px 18px; align-items:start; }
+  @media (max-width: 900px) { .layout { grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:14px; }
+  .row { display:flex; gap:8px; align-items:center; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:0 10px; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .chip { background:var(--panel2); border:1px solid var(--line); border-radius:999px; padding:3px 4px 3px 10px; display:inline-flex; align-items:center; gap:4px; }
+  .chip button { border:0; background:none; padding:0 6px; color:var(--dim); }
+  .status { color:var(--dim); font-size:13px; flex:1; min-width:180px; }
+  .bar { height:4px; background:var(--panel2); border-radius:4px; overflow:hidden; margin-top:5px; max-width:420px; }
+  .bar i { display:block; height:100%; width:0; background:var(--accent); transition:width .3s; }
+  .tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; align-items:center; }
+  .tabs button.on { border-color:var(--accent); color:var(--accent); }
+  .tabs .sp { flex:1; }
+  .tabs select { width:auto; flex:none; }
+  .card { display:grid; grid-template-columns:56px minmax(0,1fr) auto; gap:12px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:10px; }
+  .ava { width:56px; height:56px; border-radius:50%; background:var(--panel2); object-fit:cover; display:grid; place-items:center; color:var(--dim); font-weight:600; font-size:18px; }
+  .name a { color:var(--text); font-weight:600; text-decoration:none; }
+  .name a:hover { color:var(--accent); }
+  .name span { color:var(--dim); margin-left:6px; }
+  .bio { color:var(--dim); font-size:13px; margin:3px 0 6px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:3.9em; overflow:hidden; }
+  .nums { display:flex; flex-wrap:wrap; gap:6px 14px; font-size:13px; }
+  .nums b { font-weight:600; }
+  .nums span { color:var(--dim); }
+  .post { margin-top:7px; font-size:13px; color:var(--dim); border-left:2px solid var(--line); padding-left:8px; overflow-wrap:anywhere; }
+  .post a { color:var(--accent); text-decoration:none; }
+  .acts { display:flex; flex-direction:column; gap:6px; align-items:stretch; min-width:118px; }
+  .score { font-size:20px; font-weight:700; text-align:center; }
+  .score small { display:block; font-size:11px; color:var(--dim); font-weight:400; }
+  .tag { font-size:11px; border:1px solid var(--line); border-radius:6px; padding:1px 6px; color:var(--dim); margin-left:6px; }
+  .tag.warn { color:var(--warn); border-color:#5a4a22; }
+  #log { font:12px/1.5 ui-monospace, Menlo, Consolas, monospace; max-height:230px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
+  #log .warn { color:var(--warn); } #log .error { color:var(--bad); }
+  .empty { color:var(--dim); padding:30px 10px; text-align:center; }
+  .hint { color:var(--dim); font-size:12px; margin-top:6px; }
+  details summary { cursor:pointer; color:var(--dim); font-size:13px; }
+  #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#3a1f22; border:1px solid var(--bad); color:#ffd9d9; padding:9px 14px; border-radius:10px; display:none; max-width:90vw; z-index:9; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Парсер Threads</h1>
+  <div class="status"><span id="status">Загрузка…</span><div class="bar"><i id="bar"></i></div></div>
+  <button id="run" class="primary">Парсинг</button>
+  <button id="stop" class="danger" hidden>Стоп</button>
+</header>
+
+<div class="layout">
+  <div>
+    <div class="panel">
+      <h2>Референсы</h2>
+      <textarea id="seedInput" placeholder="@username или ссылки на профили, по одному в строке"></textarea>
+      <div class="row" style="margin-top:8px"><button id="seedAdd">Добавить</button></div>
+      <div class="chips" id="seeds"></div>
+      <div class="hint">От этих аккаунтов парсер идёт к их комментаторам и смотрит, на кого те подписаны.</div>
+    </div>
+
+    <div class="panel">
+      <h2>AdsPower</h2>
+      <label>Профиль с выполненным входом в Threads</label>
+      <div class="row"><select id="adsProfile"></select><button id="adsLoad" title="Загрузить список профилей">⟳</button></div>
+      <details style="margin-top:10px"><summary>Подключение</summary>
+        <label>Адрес Local API</label><input id="adsUrl">
+        <label>API-ключ (если AdsPower его требует)</label><input id="adsKey" type="password" autocomplete="off">
+        <label class="row" style="color:var(--text)"><input type="checkbox" id="closeBrowser" style="width:auto"> Закрывать браузер после парсинга</label>
+      </details>
+    </div>
+
+    <div class="panel">
+      <h2>Кого считать подходящим</h2>
+      <div class="grid2">
+        <div><label>Подписчиков от</label><input id="minFollowers" type="number" min="0"></div>
+        <div><label>Постов в неделю от</label><input id="minPostsPerWeek" type="number" min="0" step="0.5"></div>
+        <div><label>Комментариев на пост от</label><input id="minAvgReplies" type="number" min="0"></div>
+        <div><label>Пересечение аудитории от</label><input id="minOverlap" type="number" min="1"></div>
+      </div>
+      <label class="row" style="color:var(--text)"><input type="checkbox" id="englishOnly" style="width:auto"> Только англоязычные посты и комментаторы</label>
+      <details style="margin-top:10px"><summary>Объём и скорость одного запуска</summary>
+        <div class="grid2">
+          <div><label>Постов у референса</label><input id="postsPerSeed" type="number" min="1"></div>
+          <div><label>Комментаторов с поста</label><input id="commentersPerPost" type="number" min="1"></div>
+          <div><label>Открыть подписок (людей)</label><input id="maxAudience" type="number" min="1"></div>
+          <div><label>Проверить кандидатов</label><input id="maxCandidates" type="number" min="1"></div>
+          <div><label>Пауза от, мс</label><input id="delayMin" type="number" min="0" step="100"></div>
+          <div><label>Пауза до, мс</label><input id="delayMax" type="number" min="0" step="100"></div>
+        </div>
+        <label>Ключевые слова для поиска (необязательно, через запятую)</label><input id="keywords">
+      </details>
+      <div class="row" style="margin-top:12px"><button id="saveSettings">Сохранить</button><span class="hint" id="saved"></span></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="tabs" id="tabs"></div>
+    <div id="list"></div>
+    <div class="panel"><h2>Журнал</h2><div id="log"></div></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const NUM_FIELDS = ['minFollowers', 'minPostsPerWeek', 'minAvgReplies', 'minOverlap', 'postsPerSeed', 'commentersPerPost', 'maxAudience', 'maxCandidates', 'delayMin', 'delayMax'];
+const TABS = [['new', 'Найденные'], ['approved', 'Одобренные'], ['seed', 'Референсы'], ['rejected', 'Отклонённые'], ['filtered', 'Отсеянные']];
+let S = null, tab = 'new', sort = 'score', settingsDirty = false;
+
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = 'none'), 6000); }
+
+async function api(path, data) {
+  const res = await fetch(path, data === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  const out = await res.json().catch(() => ({}));
+  if (!res.ok) { toast(out.error || 'Ошибка'); throw new Error(out.error); }
+  return out;
+}
+
+const fmt = (n) => (n == null ? '—' : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K' : String(n));
+function ago(sec) {
+  if (!sec) return '—';
+  const d = Math.floor((Date.now() / 1000 - sec) / 86400);
+  return d <= 0 ? 'сегодня' : d === 1 ? 'вчера' : `${d} дн. назад`;
+}
+const bucket = (a) => (a.role === 'seed' ? 'seed' : a.status);
+
+function fillSettings() {
+  const s = S.settings;
+  for (const k of NUM_FIELDS) $(k).value = s[k];
+  $('adsUrl').value = s.adsUrl;
+  $('adsKey').placeholder = s.hasKey ? 'сохранён' : '';
+  $('closeBrowser').checked = s.closeBrowser;
+  $('englishOnly').checked = s.englishOnly;
+  $('keywords').value = s.keywords.join(', ');
+  const sel = $('adsProfile');
+  if (![...sel.options].some((o) => o.value === s.adsProfile)) {
+    sel.innerHTML = s.adsProfile ? `<option value="${esc(s.adsProfile)}">${esc(s.adsProfile)}</option>` : '<option value="">— нажмите ⟳ —</option>';
+  }
+  sel.value = s.adsProfile;
+}
+
+function readSettings() {
+  const out = { adsUrl: $('adsUrl').value, adsKey: $('adsKey').value, adsProfile: $('adsProfile').value,
+    closeBrowser: $('closeBrowser').checked, englishOnly: $('englishOnly').checked, keywords: $('keywords').value.split(',') };
+  for (const k of NUM_FIELDS) out[k] = Number($(k).value);
+  return out;
+}
+
+function card(a) {
+  const m = a.metrics || {};
+  const url = `${S.settings.threadsBase}/@${encodeURIComponent(a.username)}`;
+  const ava = a.avatar
+    ? `<img class="ava" src="/avatar/${encodeURIComponent(a.avatar)}" alt="" loading="lazy">`
+    : `<div class="ava">${esc(a.username[0].toUpperCase())}</div>`;
+  const top = (a.topPosts || [])[0];
+  const overlap = a.role === 'seed' ? '' : `<div><b>${a.overlap ?? 0}</b> <span>из ${S.audienceScanned} комментаторов подписаны</span></div>`;
+  const acts = a.role === 'seed'
+    ? `<button class="small danger" data-act="unseed">Убрать из референсов</button>`
+    : `${a.status !== 'approved' ? '<button class="small" data-act="approved">✓ Одобрить</button>' : ''}
+       <button class="small" data-act="seed">★ В референсы</button>
+       ${a.status !== 'rejected' ? '<button class="small danger" data-act="rejected">✕ Отклонить</button>' : '<button class="small" data-act="new">Вернуть</button>'}`;
+  return `<div class="card" data-u="${esc(a.username)}">
+    ${ava}
+    <div>
+      <div class="name"><a href="${esc(url)}" target="_blank" rel="noopener noreferrer">@${esc(a.username)}</a>${a.verified ? ' ✔' : ''}<span>${esc(a.fullName)}</span>
+        ${a.filterReason ? `<span class="tag warn">${esc(a.filterReason)}</span>` : ''}${a.via ? `<span class="tag">${esc(a.via)}</span>` : ''}</div>
+      <div class="bio">${esc(a.bio)}</div>
+      <div class="nums">
+        <div><b>${fmt(a.followers)}</b> <span>подписчиков</span></div>
+        <div><b>${m.postsPerWeek ?? '—'}</b> <span>постов/нед</span></div>
+        <div><b>${fmt(m.avgLikes)}</b> <span>лайков</span></div>
+        <div><b>${m.avgReplies ?? '—'}</b> <span>комментариев на пост</span></div>
+        <div><span>последний пост:</span> <b>${ago(m.lastPostAt)}</b></div>
+        ${overlap}
+      </div>
+      ${a.sources?.length ? `<div class="hint">Аудитория от: ${a.sources.map((x) => '@' + esc(x)).join(', ')}</div>` : ''}
+      ${top ? `<div class="post">${esc(top.text.slice(0, 200)) || '(пост без текста)'} · 💬 ${fmt(top.replies)} · ♥ ${fmt(top.likes)} · <a href="${esc(url)}/post/${encodeURIComponent(top.code)}" target="_blank" rel="noopener noreferrer">открыть</a></div>` : ''}
+    </div>
+    <div class="acts">${a.role === 'seed' ? '' : `<div class="score">${a.score ?? 0}<small>оценка</small></div>`}${acts}</div>
+  </div>`;
+}
+
+function render() {
+  const counts = {};
+  for (const a of S.accounts) counts[bucket(a)] = (counts[bucket(a)] || 0) + 1;
+  $('tabs').innerHTML = TABS.map(([k, t]) => `<button data-tab="${k}" class="${k === tab ? 'on' : ''}">${t} ${counts[k] || 0}</button>`).join('')
+    + `<span class="sp"></span><select id="sort">
+        <option value="score">По оценке</option><option value="overlap">По пересечению аудитории</option>
+        <option value="replies">По комментариям</option><option value="followers">По подписчикам</option><option value="activity">По частоте постов</option>
+       </select><button id="csv">CSV</button>`;
+  $('sort').value = sort;
+  const key = { score: (a) => a.score || 0, overlap: (a) => a.overlap || 0, replies: (a) => a.metrics?.avgReplies || 0,
+    followers: (a) => a.followers || 0, activity: (a) => a.metrics?.postsPerWeek || 0 }[sort];
+  const rows = S.accounts.filter((a) => bucket(a) === tab).sort((a, b) => key(b) - key(a));
+  $('list').innerHTML = rows.length ? rows.map(card).join('')
+    : `<div class="empty">${tab === 'new' ? 'Пока пусто. Добавьте референсы, выберите профиль AdsPower и нажмите «Парсинг».' : 'Здесь пока ничего нет.'}</div>`;
+  $('seeds').innerHTML = S.seeds.map((u) => `<span class="chip">@${esc(u)}<button data-rm="${esc(u)}" title="Убрать">×</button></span>`).join('');
+  renderJob();
+}
+
+function renderJob() {
+  const j = S.job;
+  $('run').hidden = j.running; $('stop').hidden = !j.running;
+  const r = S.lastRun;
+  $('status').textContent = j.running ? `${j.phase || 'Работаю'}${j.total ? ` — ${j.done} из ${j.total}` : '…'}`
+    : r ? `Последний запуск ${new Date(r.at).toLocaleString('ru')}: проверено ${r.evaluated}, подходящих ${r.found}` : 'Готов к запуску';
+  $('bar').style.width = j.running && j.total ? `${Math.round((j.done / j.total) * 100)}%` : '0';
+}
+
+function addLog(e) {
+  const el = document.createElement('div');
+  el.className = e.level;
+  el.textContent = `${new Date(e.t).toLocaleTimeString('ru')}  ${e.msg}`;
+  const box = $('log');
+  box.append(el);
+  box.scrollTop = box.scrollHeight;
+}
+
+async function refresh(first) {
+  S = await api('/api/state');
+  if (first || !settingsDirty) fillSettings();
+  if (first) { $('log').textContent = ''; S.job.log.forEach(addLog); }
+  render();
+}
+
+$('tabs').addEventListener('click', (e) => {
+  if (e.target.dataset.tab) { tab = e.target.dataset.tab; render(); }
+  if (e.target.id === 'csv') location.href = '/api/export.csv';
+});
+$('tabs').addEventListener('change', (e) => { if (e.target.id === 'sort') { sort = e.target.value; render(); } });
+$('list').addEventListener('click', async (e) => {
+  const act = e.target.dataset.act;
+  if (!act) return;
+  const u = e.target.closest('.card').dataset.u;
+  if (act === 'seed') S = await api('/api/seeds', { add: [u] });
+  else if (act === 'unseed') S = await api('/api/seeds', { remove: [u] });
+  else S = await api(`/api/account/${encodeURIComponent(u)}`, { status: act });
+  render();
+});
+$('seeds').addEventListener('click', async (e) => { if (e.target.dataset.rm) { S = await api('/api/seeds', { remove: [e.target.dataset.rm] }); render(); } });
+$('seedAdd').onclick = async () => {
+  const add = $('seedInput').value.split(/[\s,]+/).filter(Boolean);
+  if (!add.length) return;
+  S = await api('/api/seeds', { add });
+  $('seedInput').value = '';
+  render();
+};
+async function saveSettings() {
+  S = await api('/api/settings', readSettings());
+  settingsDirty = false;
+  $('adsKey').value = '';
+  fillSettings();
+  $('saved').textContent = 'Сохранено';
+  setTimeout(() => ($('saved').textContent = ''), 2000);
+}
+$('saveSettings').onclick = saveSettings;
+document.querySelectorAll('.panel input, .panel select').forEach((el) => el.addEventListener('input', () => { if (el.id !== 'seedInput') settingsDirty = true; }));
+$('adsLoad').onclick = async () => {
+  await api('/api/settings', readSettings());
+  const { profiles } = await api('/api/adspower/profiles', {});
+  const cur = $('adsProfile').value;
+  $('adsProfile').innerHTML = '<option value="">— выберите профиль —</option>' + profiles.map((p) =>
+    `<option value="${esc(p.id)}">${esc([p.serial && '#' + p.serial, p.name, p.group].filter(Boolean).join(' · ') || p.id)}</option>`).join('');
+  $('adsProfile').value = cur;
+  if (!profiles.length) toast('В AdsPower нет профилей');
+};
+$('run').onclick = async () => {
+  await saveSettings();
+  if (!S.seeds.length) return toast('Добавьте хотя бы один референс');
+  if (!S.settings.adsProfile) return toast('Выберите профиль AdsPower (кнопка ⟳)');
+  $('log').textContent = '';
+  await api('/api/run', {});
+};
+$('stop').onclick = () => api('/api/stop', {});
+
+const es = new EventSource('/api/events');
+es.addEventListener('log', (e) => addLog(JSON.parse(e.data)));
+es.addEventListener('progress', (e) => { if (S) { Object.assign(S.job, JSON.parse(e.data)); renderJob(); } });
+es.addEventListener('status', () => refresh());
+es.addEventListener('change', () => refresh());
+refresh(true);
+</script>
+</body>
+</html>

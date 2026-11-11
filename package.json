@@ -4,13 +4,18 @@
   "description": "Видеостудия, которой управляет ИИ-агент: MCP-сервер + веб-редактор с таймлайном, рендер через ffmpeg",
   "type": "module",
   "private": true,
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/server.js",
     "mcp": "node src/mcp.js",
-    "test": "node test/smoke.js"
+    "test": "node test/smoke.js",
+    "threads": "node src/threads/server.js",
+    "test:threads": "node test/threads.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.12.0"
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "playwright-core": "^1.65.0"
   }
 }
