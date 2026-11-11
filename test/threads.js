@@ -321,6 +321,16 @@ try {
   assert.ok(st.newPosts.some((p) => p.code === 'LNEW') && st.newPosts.some((p) => p.code === 'LOLD'));
   assert.match(out, /Остановлено пользователем/);
   console.log('✓ дежурство: подписка на базу, один сигнал в Telegram о свежем посте');
+
+  // The single Start button: scouts → base → follow → on duty, without further clicks.
+  await call('/api/run', { mode: 'auto' });
+  for (let i = 0; i < 240; i++) { await sleep(500); st = await call('/api/state'); if (/^Дежурство/.test(st.job.phase) || !st.job.running) break; }
+  out = st.job.log.map((l) => `[${l.level}] ${l.msg}`).join('\n');
+  assert.ok(st.job.running && /^Дежурство/.test(st.job.phase), out);
+  assert.ok(/Слежение|Готово/.test(out) && !/\[error\]/.test(out), out);
+  await call('/api/stop', {});
+  await wait();
+  console.log('✓ кнопка «Старт»: вся цепочка одним запуском');
 } finally {
   app.kill();
   chrome?.removeAllListeners('exit');

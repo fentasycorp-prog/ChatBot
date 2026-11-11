@@ -38,6 +38,8 @@ export const SETTING_SPEC = {
   minAvgReplies: [5, 0, 1e6],
   minAvgLikes: [50, 0, 1e8],
   requireLink: false,
+  autoFollow: true,                // the Start button also follows found authors, so their posts reach the feed
+  rescanHours: [3, 1, 48],         // Start: re-read the scouts this often while on duty
   autoTrack: true,                 // authors that scouts comment under join the tracked base without manual approval
   minScoutComments: [1, 1, 100],   // scout comments under an author needed to consider her              // only accounts with a link in the bio
   scoutChecks: [20, 0, 100],        // most active commenters checked per run for being a mass commenter

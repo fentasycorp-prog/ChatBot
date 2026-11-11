@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { load, save, cleanSettings, AVATARS, DIR } from './db.js';
 import { AdsPower } from './adspower.js';
 import os from 'node:os';
-import { crawl, monitor, followBase, publish, Stop, tracked, scouts } from './crawler.js';
+import { crawl, monitor, followBase, auto, publish, Stop, tracked, scouts } from './crawler.js';
 import { tgSend } from './telegram.js';
 import { normName } from './extract.js';
 
@@ -27,7 +27,7 @@ function start(mode = 'full') {
   if (job.running) throw new Error('Сейчас уже идёт работа — дождитесь окончания или нажмите «Стоп»');
   Object.assign(job, { running: true, stop: false, phase: 'Запуск', done: 0, total: 0, log: [] });
   emit('status', { running: true });
-  const run = { monitor, follow: followBase }[mode] || crawl;
+  const run = { monitor, follow: followBase, auto }[mode] || crawl;
   run({ emit, isStopped: () => job.stop, mode })
     .catch((e) => emit('log', { t: new Date().toISOString(), level: e instanceof Stop ? 'info' : 'error', msg: e instanceof Stop ? 'Остановлено пользователем' : e.message.split('\n')[0] }))
     .finally(() => { job.running = false; job.phase = ''; emit('status', { running: false }); });
@@ -167,7 +167,7 @@ const server = http.createServer(async (req, res) => {
       save();
       return json(res, 200, state());
     }
-    if (url.pathname === '/api/run') { start(['watch', 'monitor', 'follow'].includes(args.mode) ? args.mode : 'full'); return json(res, 200, { ok: true }); }
+    if (url.pathname === '/api/run') { start(['watch', 'monitor', 'follow', 'auto'].includes(args.mode) ? args.mode : 'full'); return json(res, 200, { ok: true }); }
     if (url.pathname === '/api/tg-test') {
       if (!(await tgSend(db.settings, '✅ Парсер Threads: сигналы о новых постах будут приходить сюда'))) throw new Error('Укажите токен бота и chat id');
       return json(res, 200, { ok: true });

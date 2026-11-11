@@ -359,7 +359,8 @@ export async function crawl({ emit, isStopped, mode = 'full' }) {
 
 // On-duty mode: keep checking the Following feed (plus a few base authors directly, in turn)
 // and signal every fresh post of a base author. Runs until stopped.
-export async function monitor({ emit, isStopped }) {
+export async function monitor({ emit, isStopped, forMs = 0 }) {
+  const startedAt = Date.now();
   const db = load();
   const s = db.settings;
   const log = (msg, level = 'info') => emit('log', { t: new Date().toISOString(), level, msg });
@@ -394,6 +395,7 @@ export async function monitor({ emit, isStopped }) {
     log(`Дежурство: проверяю ленту подписок каждые ${s.monitorEvery} с, сигнал о постах моложе ${s.alertMaxAgeMin} мин`);
     for (;;) {
       check();
+      if (forMs && Date.now() - startedAt > forMs) return;
       try {
         const feed = await t.feed(s.feedPath);
         if (cycle === 0) log(`В ленте подписок постов: ${feed.length}`);
@@ -419,6 +421,21 @@ export async function monitor({ emit, isStopped }) {
   } finally {
     save();
     await session.close();
+  }
+}
+
+// One button: read the scouts, add the authors they comment under, follow them, then stay on duty.
+// Every few hours the scouts are read again so the base keeps growing.
+export async function auto(ctx) {
+  const db = load();
+  const log = (msg, level = 'info') => ctx.emit('log', { t: new Date().toISOString(), level, msg });
+  for (;;) {
+    await crawl({ ...ctx, mode: 'watch' });
+    if (!tracked(db).some((u) => db.accounts[u])) throw new Error('Авторы не нашлись. Добавьте другой аккаунт, который комментирует чаще, или смягчите фильтр в настройках.');
+    if (db.settings.autoFollow && tracked(db).some((u) => db.accounts[u] && !db.accounts[u].followed)) {
+      await followBase(ctx).catch((e) => { if (e instanceof Stop || e instanceof Blocked) throw e; log(e.message.split('\n')[0], 'warn'); });
+    }
+    await monitor({ ...ctx, forMs: db.settings.rescanHours * 3600e3 });
   }
 }
 
