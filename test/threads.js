@@ -142,7 +142,14 @@ const site = http.createServer((req, res) => {
 });
 
 // ---------- fake AdsPower ----------
-const CHROME = [process.env.CHROME_PATH, '/opt/pw-browsers/chromium'].find((p) => p && fs.existsSync(p));
+const WIN = ['PROGRAMFILES', 'PROGRAMFILES(X86)', 'LOCALAPPDATA'].map((v) => process.env[v]).filter(Boolean);
+const CHROME = [
+  process.env.CHROME_PATH,
+  '/opt/pw-browsers/chromium',
+  ...WIN.flatMap((d) => [path.join(d, 'Google', 'Chrome', 'Application', 'chrome.exe'), path.join(d, 'Microsoft', 'Edge', 'Application', 'msedge.exe')]),
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
+].find((p) => p && fs.existsSync(p));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'threads-test-'));
 let chrome = null, wsUrl = null, started = 0, stopped = 0;
 function launchChrome() {

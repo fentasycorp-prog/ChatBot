@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "video-studio": {
-      "command": "node",
-      "args": ["src/mcp.js"]
-    }
-  }
-}
