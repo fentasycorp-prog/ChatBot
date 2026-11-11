@@ -79,8 +79,10 @@ const SKYE_REPLIES = [
   [post('lola', 'L0', 4, 2000, 120, 'x'), post('skye', 'C4', 3, 2, 0, 'so true, I think that all the time')],
 ];
 // spam_bot comments in bulk, mostly under kelly_hot.
+// One of them (i = 1) answers another commenter, fan1, under kelly_hot's post: it must still count for kelly_hot.
 const BOT_REPLIES = [...Array(12)].map((_, i) => [post(i % 4 ? 'kelly_hot' : 'megan_big', `X${i}`, 5, 1, 1, 'x'),
-  post('spam_bot', `BC${i}`, 1 + i, 0, 0, 'you are so pretty, check my bio', { is_reply: true, reply_to_author: { username: i % 4 ? 'kelly_hot' : 'megan_big' } })]);
+  ...(i === 1 ? [post('fan1', 'F1X', 4, 1, 1, 'nice one', { is_reply: true, reply_to_author: { username: 'kelly_hot' } })] : []),
+  post('spam_bot', `BC${i}`, 1 + i, 0, 0, 'you are so pretty, check my bio', { is_reply: true, reply_to_author: { username: i === 1 ? 'fan1' : i % 4 ? 'kelly_hot' : 'megan_big' } })]);
 const POSTED = [], FOLLOWED = [], TG = [];
 const FEED = [post('lola', 'LNEW', 2 / 60, 10, 1, 'just posted this, what do you think'), post('bob', 'BNEW', 1 / 60, 5, 0, 'fresh one from someone outside the base'), post('lola', 'LOLD', 30, 900, 50, 'an older one')];
 const HOME = `<h1>home</h1><div id="open" style="cursor:pointer">What's new?</div><script>

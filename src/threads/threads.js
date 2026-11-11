@@ -124,7 +124,9 @@ export class Threads {
     const out = [];
     for (const [key, p] of this.bag.posts) {
       if (p.username !== name || p.embedded) continue;
-      const to = p.replyTo || this.bag.parents.get(key) || null;
+      // Whose post the comment sits under. A reply to another commenter still counts for the post's author.
+      const root = this.bag.roots.get(key);
+      const to = (root && root !== name ? root : null) || p.replyTo || this.bag.parents.get(key) || null;
       if (!(p.isReply || to) || to === name) continue;
       out.push({ code: p.code, text: p.text.slice(0, 400), to, takenAt: p.takenAt, likes: p.likes, replies: p.replies });
     }

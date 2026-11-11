@@ -2,7 +2,7 @@
 // JSON the site ships (embedded <script> blobs and GraphQL responses), and turn
 // a list of posts into activity/engagement numbers. No browser code here.
 
-export const newBag = () => ({ users: new Map(), posts: new Map(), parents: new Map() });
+export const newBag = () => ({ users: new Map(), posts: new Map(), parents: new Map(), roots: new Map() });
 
 export const normName = (u) => String(u || '').trim().replace(/^.*threads\.(?:net|com)\//i, '').replace(/^@/, '')
   .split(/[/?#\s]/)[0].toLowerCase();
@@ -77,12 +77,18 @@ export function harvest(root, bag) {
     if (isPost(node)) addPost(bag, node, embedded);
     // In a thread each item answers the one before it: remember whose post a reply sits under.
     if (Array.isArray(node.thread_items)) {
-      let prev = null;
+      // The first item is the post the whole conversation hangs under: that is where the audience is,
+      // even when the reply itself answers another commenter further down.
+      let prev = null, root = null;
       for (const it of node.thread_items) {
         const p = it?.post;
         if (!p?.user || typeof p.user.username !== 'string') continue;
-        if (prev && (p.code || p.pk != null)) bag.parents.set(String(p.code || p.pk), prev);
+        if (prev && (p.code || p.pk != null)) {
+          bag.parents.set(String(p.code || p.pk), prev);
+          bag.roots.set(String(p.code || p.pk), root);
+        }
         prev = p.user.username.toLowerCase();
+        root ??= prev;
       }
     }
     for (const [k, v] of Object.entries(node)) {
