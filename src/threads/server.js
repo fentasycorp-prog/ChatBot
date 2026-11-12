@@ -9,6 +9,8 @@ import { AdsPower } from './adspower.js';
 import os from 'node:os';
 import { crawl, monitor, followBase, auto, publish, Stop, tracked, scouts } from './crawler.js';
 import { tgSend } from './telegram.js';
+import { research, summary, addCategory } from './categories.js';
+import { tagName } from './extract.js';
 import { normName } from './extract.js';
 
 const PORT = Number(process.env.THREADS_PORT || 4330);
@@ -27,7 +29,7 @@ function start(mode = 'full') {
   if (job.running) throw new Error('Сейчас уже идёт работа — дождитесь окончания или нажмите «Стоп»');
   Object.assign(job, { running: true, stop: false, phase: 'Запуск', done: 0, total: 0, log: [] });
   emit('status', { running: true });
-  const run = { monitor, follow: followBase, auto }[mode] || crawl;
+  const run = { monitor, follow: followBase, auto, research }[mode] || crawl;
   run({ emit, isStopped: () => job.stop, mode })
     .catch((e) => emit('log', { t: new Date().toISOString(), level: e instanceof Stop ? 'info' : 'error', msg: e instanceof Stop ? 'Остановлено пользователем' : e.message.split('\n')[0] }))
     .finally(() => { job.running = false; job.phase = ''; emit('status', { running: false }); });
@@ -54,6 +56,7 @@ function state() {
     seeds: db.seeds,
     accounts: Object.values(db.accounts).map(({ comments, posts, ...a }) => a),
     scouts: scouts(db),
+    categories: summary(db),
     // Own posts of references and approved authors, newest first.
     newPosts: Object.values(db.accounts).flatMap((a) => (a.posts || []).map((p) => ({ ...p, by: a.username })))
       .sort((x, y) => (y.takenAt || 0) - (x.takenAt || 0)).slice(0, 120)
@@ -113,6 +116,17 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="threads-accounts.csv"' });
       return res.end(csv(db));
     }
+    if (req.method === 'GET' && url.pathname === '/api/category.csv') {
+      const cat = summary(db).find((c) => c.name === tagName(url.searchParams.get('name')));
+      if (!cat) return json(res, 404, { error: 'Категория не найдена' });
+      const rows = [['list', 'rank', 'username', 'url', 'name', 'followers', 'posts_per_week', 'avg_likes', 'avg_replies', 'fans_commenting', 'fan_comments', 'active_hours_utc', 'funnel']];
+      for (const [list, items] of [['top', cat.top], ['by_fans', cat.byFans]]) {
+        items.forEach((r, i) => rows.push([list, i + 1, r.username, `${db.settings.threadsBase}/@${r.username}`, r.fullName, r.followers, r.postsPerWeek, r.avgLikes, r.avgReplies,
+          r.fans ?? '', r.fanComments ?? '', r.activeHours.join(' '), r.funnel.join(' > ')]));
+      }
+      res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`threads-${cat.name}.csv`)}` });
+      return res.end('\ufeff' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n'));
+    }
     if (req.method === 'GET' && seg[0] === 'avatar') {
       const file = path.join(AVATARS, path.basename(seg[1] || ''));
       if (!fs.existsSync(file)) { res.writeHead(404); return res.end(); }
@@ -134,6 +148,12 @@ const server = http.createServer(async (req, res) => {
       const ads = new AdsPower(db.settings.adsUrl, db.settings.adsKey);
       await ads.status();
       return json(res, 200, { profiles: await ads.profiles() });
+    }
+    if (url.pathname === '/api/categories') {
+      for (const raw of args.add || []) addCategory(db, raw);
+      for (const raw of args.remove || []) delete db.categories[tagName(raw)];
+      save();
+      return json(res, 200, state());
     }
     if (url.pathname === '/api/seeds' && args.kind === 'scout') {
       for (const raw of args.add || []) {
@@ -167,7 +187,7 @@ const server = http.createServer(async (req, res) => {
       save();
       return json(res, 200, state());
     }
-    if (url.pathname === '/api/run') { start(['watch', 'monitor', 'follow', 'auto'].includes(args.mode) ? args.mode : 'full'); return json(res, 200, { ok: true }); }
+    if (url.pathname === '/api/run') { start(['watch', 'monitor', 'follow', 'auto', 'research'].includes(args.mode) ? args.mode : 'full'); return json(res, 200, { ok: true }); }
     if (url.pathname === '/api/tg-test') {
       if (!(await tgSend(db.settings, '✅ Парсер Threads: сигналы о новых постах будут приходить сюда'))) throw new Error('Укажите токен бота и chat id');
       return json(res, 200, { ok: true });

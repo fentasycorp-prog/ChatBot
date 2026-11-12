@@ -126,7 +126,8 @@ export class Threads {
       if (p.username !== name || p.embedded) continue;
       const to = p.replyTo || this.bag.parents.get(key) || null;
       if (!(p.isReply || to) || to === name) continue;
-      out.push({ code: p.code, text: p.text.slice(0, 400), to, takenAt: p.takenAt, likes: p.likes, replies: p.replies });
+      const parent = this.bag.posts.get(this.bag.parentPosts.get(key));
+      out.push({ code: p.code, text: p.text.slice(0, 400), to, takenAt: p.takenAt, likes: p.likes, replies: p.replies, tags: parent?.tags || [] });
     }
     const own = [...this.bag.posts.values()].filter((p) => p.username === name && !p.embedded).length;
     return { list: out, found: this.bag.users.has(name) || own > 0, user: { username: name, ...this.bag.users.get(name) } };
@@ -183,6 +184,17 @@ export class Threads {
     await this.scroll(scrolls, () => this.bag.posts.size);
     const authors = new Set([...this.bag.posts.values()].filter((p) => !p.embedded).map((p) => p.username));
     return { authors: [...authors], users: this.bag.users };
+  }
+
+  // Posts filed under a category (topic). Falls back to plain search when the topic page gives nothing.
+  async topic(name, { scrolls = 8, tagPath = '/search?q={q}&serp_type=tags' } = {}) {
+    for (const tpl of [tagPath, '/search?q={q}&serp_type=default']) {
+      await this.goto(tpl.replace('{q}', encodeURIComponent(name)));
+      await this.scroll(scrolls, () => this.bag.posts.size);
+      const posts = [...this.bag.posts.values()].filter((p) => !p.embedded && !p.isReply);
+      if (posts.length) return posts;
+    }
+    return [];
   }
 
   // Posts currently shown in a feed page (for example the Following feed).

@@ -2,7 +2,32 @@
 // JSON the site ships (embedded <script> blobs and GraphQL responses), and turn
 // a list of posts into activity/engagement numbers. No browser code here.
 
-export const newBag = () => ({ users: new Map(), posts: new Map(), parents: new Map() });
+export const newBag = () => ({ users: new Map(), posts: new Map(), parents: new Map(), parentPosts: new Map() });
+
+export const tagName = (s) => String(s || '').trim().toLowerCase().replace(/^#/, '').replace(/\s+/g, ' ').slice(0, 60);
+
+// The topic (category) a post is filed under, plus hashtags in its text.
+function postTags(info, text) {
+  const out = new Set();
+  const stack = [[info, 0]];
+  while (stack.length) {
+    const [node, depth] = stack.pop();
+    if (!node || typeof node !== 'object' || depth > 5) continue;
+    if (!Array.isArray(node)) {
+      if (typeof node.fragment_type === 'string' && /tag/i.test(node.fragment_type) && typeof node.plaintext === 'string') out.add(tagName(node.plaintext));
+      for (const [k, v] of Object.entries(node)) {
+        if (/^tag(_header|_info)?$/i.test(k) && v && typeof v === 'object') {
+          const n = v.display_name || v.tag_name || v.name;
+          if (typeof n === 'string') out.add(tagName(n));
+        }
+      }
+    }
+    for (const [k, v] of Object.entries(node)) if (v && typeof v === 'object' && k !== 'share_info' && k !== 'reply_to_author') stack.push([v, depth + 1]);
+  }
+  for (const m of String(text || '').matchAll(/#([\p{L}\p{N}_]{2,40})/gu)) out.add(tagName(m[1]));
+  out.delete('');
+  return [...out];
+}
 
 export const normName = (u) => String(u || '').trim().replace(/^.*threads\.(?:net|com)\//i, '').replace(/^@/, '')
   .split(/[/?#\s]/)[0].toLowerCase();
@@ -57,6 +82,7 @@ function addPost(bag, o, embedded) {
     quotes: numOrNull(info.quote_count),
     takenAt: numOrNull(o.taken_at),
     isReply: Boolean(info.is_reply || info.reply_to_author),
+    tags: postTags(info, typeof text === 'string' ? text : ''),
     replyTo: typeof info.reply_to_author?.username === 'string' ? info.reply_to_author.username.toLowerCase() : null,
     media: Boolean(o.image_versions2?.candidates?.length || o.video_versions?.length || o.carousel_media?.length),
     // A post quoted or reposted inside another one: not part of the page's own list.
@@ -77,12 +103,13 @@ export function harvest(root, bag) {
     if (isPost(node)) addPost(bag, node, embedded);
     // In a thread each item answers the one before it: remember whose post a reply sits under.
     if (Array.isArray(node.thread_items)) {
-      let prev = null;
+      let prev = null, prevKey = null;
       for (const it of node.thread_items) {
         const p = it?.post;
         if (!p?.user || typeof p.user.username !== 'string') continue;
-        if (prev && (p.code || p.pk != null)) bag.parents.set(String(p.code || p.pk), prev);
+        if (prev && (p.code || p.pk != null)) { bag.parents.set(String(p.code || p.pk), prev); bag.parentPosts.set(String(p.code || p.pk), prevKey); }
         prev = p.user.username.toLowerCase();
+        prevKey = String(p.code || p.pk);
       }
     }
     for (const [k, v] of Object.entries(node)) {

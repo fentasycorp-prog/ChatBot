@@ -54,14 +54,14 @@ const USERS = {
     post('skye', 'S1', 5, 900, 140, 'what are you all doing this weekend'), post('skye', 'S2', 30, 700, 60, 'I just can not with this weather'),
     post('skye', 'S3', 60, 500, 20, 'so tired today but it is fine') ] },
   lola: { full_name: 'lola 🐰', is_verified: true, domFollowers: '90.5K followers', biography: 'be nice', bio_links: [{ url: 'https://example.com/lola' }],
-    posts: [...Array(9)].map((_, i) => post('lola', `L${i}`, 4 + i * 14, 2000, 120, 'tell me what you think of this and be honest with me')) },
+    posts: [...Array(9)].map((_, i) => post('lola', `L${i}`, 4 + i * 14, 2000, 120, 'tell me what you think of this and be honest with me', { text_fragments: { fragments: [{ fragment_type: 'tag', plaintext: 'NYC Dating' }] } })) },
   lisa: { full_name: 'Lisa Thompson', follower_count: 40000, posts: [post('lisa', 'I1', 24 * 20, 300, 40, 'it has been a while, I know')] },
   bob: { full_name: 'Bob', follower_count: 120, posts: [] },
   spam_bot: { full_name: 'hot girl', follower_count: 3, bio_links: [{ url: 'https://beacons.ai/x' }] },
   kelly_hot: { full_name: 'Kelly', follower_count: 70000, bio_links: [{ url: 'https://example.com/k' }],
-    posts: [...Array(8)].map((_, i) => post('kelly_hot', `K${i}`, 2 + i * 9, 800, 60, 'I do not know what to do with my day, tell me')) },
+    posts: [...Array(8)].map((_, i) => post('kelly_hot', `K${i}`, 2 + i * 9, 800, 60, 'I do not know what to do with my day, tell me #dating', { text_fragments: { fragments: [{ fragment_type: 'tag', plaintext: 'nyc dating' }] } })) },
   megan_big: { full_name: 'Megan', follower_count: 500000, biography: 'all my links below', bio_links: [{ url: 'https://linktr.ee/megan' }],
-    posts: [...Array(8)].map((_, i) => post('megan_big', `M${i}`, 3 + i * 10, 9000, 400, 'what do you all think about this, tell me in the replies')) },
+    posts: [...Array(8)].map((_, i) => post('megan_big', `M${i}`, 3 + i * 10, 9000, 400, 'what do you all think about this, tell me in the replies', { tag_header: { display_name: 'NYC  Dating' } })) },
   bigfan: { full_name: 'Big Fan', follower_count: 50000, posts: [post('bigfan', 'B1', 24 * 50, 3, 0, 'that is all I have to say')] },
   fan1: { full_name: 'Mark', follower_count: 80 }, fan2: { full_name: 'Don', follower_count: 12 },
   fan3: { full_name: 'Dale', follower_count: 40 }, fan_ru: { full_name: 'Иван', follower_count: 5 },
@@ -81,6 +81,16 @@ const SKYE_REPLIES = [
 // spam_bot comments in bulk, mostly under kelly_hot.
 const BOT_REPLIES = [...Array(12)].map((_, i) => [post(i % 4 ? 'kelly_hot' : 'megan_big', `X${i}`, 5, 1, 1, 'x'),
   post('spam_bot', `BC${i}`, 1 + i, 0, 0, 'you are so pretty, check my bio', { is_reply: true, reply_to_author: { username: i % 4 ? 'kelly_hot' : 'megan_big' } })]);
+// Category research: who shows up in the "dating" topic, and what the fans under those posts comment on.
+const AUTHOR_REPLIES = { lola: [['fan1', 'I love this one so much, you are the best'], ['fan2', 'what a great thing to see on my feed today']],
+  megan_big: [['fan1', 'this is so good, I can not stop looking at it']], kelly_hot: [['fan3', 'you are so right about that and I love it']] };
+const parentOf = (u, code) => USERS[u].posts.find((p) => p.post.code === code);
+const FAN_REPLIES = {
+  fan1: [[parentOf('lola', 'L0'), post('fan1', 'F1a', 2, 1, 0, 'love it')], [parentOf('lola', 'L1'), post('fan1', 'F1b', 20, 1, 0, 'so good')], [parentOf('megan_big', 'M0'), post('fan1', 'F1c', 3, 0, 0, 'wow')]],
+  fan2: [[parentOf('lola', 'L0'), post('fan2', 'F2a', 5, 0, 0, 'nice one')]],
+  fan3: [[parentOf('kelly_hot', 'K0'), post('fan3', 'F3a', 4, 0, 0, 'yes')], [parentOf('lola', 'L2'), post('fan3', 'F3b', 6, 0, 0, 'so true')]],
+};
+const TOPIC = { dating: () => [parentOf('lola', 'L0'), parentOf('megan_big', 'M0'), parentOf('kelly_hot', 'K0'), USERS.bigfan.posts[0], USERS.lisa.posts[0]] };
 const POSTED = [], FOLLOWED = [], TG = [];
 const FEED = [post('lola', 'LNEW', 2 / 60, 10, 1, 'just posted this, what do you think'), post('bob', 'BNEW', 1 / 60, 5, 0, 'fresh one from someone outside the base'), post('lola', 'LOLD', 30, 900, 50, 'an older one')];
 const HOME = `<h1>home</h1><div id="open" style="cursor:pointer">What's new?</div><script>
@@ -124,15 +134,19 @@ const site = http.createServer((req, res) => {
   if (seg[0] === 'pic') { res.writeHead(200, { 'Content-Type': 'image/jpeg' }); return res.end(Buffer.from([0xff, 0xd8, 0xff, 0xd9])); }
   const name = (seg[0] || '').replace(/^@/, '');
   if (!seg[0]) return html(HOME);
+  if (seg[0] === 'search') {
+    const list = url.searchParams.get('serp_type') === 'tags' ? TOPIC[url.searchParams.get('q')]?.() || [] : [];
+    return html(blob({ searchResults: { edges: list.map((p) => ({ node: { thread_items: [p] } })) } }) + '<h1>search</h1>');
+  }
   if (seg[0] === 'following') return html(blob({ feed: { edges: FEED.map((p) => ({ node: { thread_items: [p] } })) } }) + '<h1>following</h1>');
   if (!USERS[name]) return html('<p>Sorry, this page is not available</p>');
   if (seg[1] === 'replies') {
-    return html(blob({ data: { edges: (name === 'skye' ? SKYE_REPLIES : name === 'spam_bot' ? BOT_REPLIES : []).map((thread_items) => ({ node: { thread_items } })) } }) + '<h1>replies</h1>');
+    return html(blob({ data: { edges: (name === 'skye' ? SKYE_REPLIES : name === 'spam_bot' ? BOT_REPLIES : FAN_REPLIES[name] || []).map((thread_items) => ({ node: { thread_items } })) } }) + '<h1>replies</h1>');
   }
   if (seg[1] === 'post') {
     const own = USERS[name].posts.find((p) => p.post.code === seg[2]);
     own.post.text_post_app_info.share_info = { quoted_post: post('quoted_guy', 'Q1', 99, 1, 0, 'quoted').post };
-    const reps = (REPLIES[seg[2]] || []).map(([u, text], i) => ({ thread_items: [post(u, `R${seg[2]}${i}`, 1, 3, 0, text, { is_reply: true, reply_to_author: { username: name } })] }));
+    const reps = (REPLIES[seg[2]] || AUTHOR_REPLIES[name] || []).map(([u, text], i) => ({ thread_items: [post(u, `R${seg[2]}${i}`, 1, 3, 0, text, { is_reply: true, reply_to_author: { username: name } })] }));
     return html(blob({ data: { edges: [{ node: { thread_items: [own] } }, ...reps.map((node) => ({ node }))] } }) + '<article>post</article>');
   }
   const u = USERS[name];
@@ -331,6 +345,29 @@ try {
   await call('/api/stop', {});
   await wait();
   console.log('✓ кнопка «Старт»: вся цепочка одним запуском');
+
+  // Category research: topic → authors → fans → whom the fans comment on → related topic.
+  await call('/api/settings', { reevalDays: 0, catScrolls: 1, catExpandMin: 3 });
+  st = await call('/api/categories', { add: ['#Dating', 'dating'] });
+  assert.deepEqual(st.categories.map((c) => c.name), ['dating']);
+  await call('/api/run', { mode: 'research' });
+  out = await wait();
+  assert.ok(!st.job.running && !/\[error\]/.test(out) && /Готово/.test(out), out);
+  const cats = Object.fromEntries(st.categories.map((c) => [c.name, c]));
+  try {
+    assert.deepEqual(Object.keys(cats), ['dating', 'nyc dating'], 'похожая категория добавлена сама');
+    assert.equal(cats['nyc dating'].auto, true);
+    assert.deepEqual(cats.dating.top.map((r) => r.username).sort(), ['kelly_hot', 'lola', 'megan_big']);
+    assert.deepEqual([cats.dating.byFans[0].username, cats.dating.byFans[0].fans, cats.dating.byFans[0].fanComments], ['lola', 3, 4]);
+    assert.deepEqual([cats.dating.fansTotal, cats.dating.fansScanned], [3, 3]);
+    assert.ok(cats.dating.postsPerDay >= 3 && cats.dating.fanHours.length > 0, JSON.stringify(cats.dating));
+    assert.equal(st.accounts.find((a) => a.username === 'lola').status, 'approved', 'прежний статус автора не теряется');
+  } catch (e) { console.error(out, JSON.stringify(cats, null, 1).slice(0, 3000)); throw e; }
+  const catCsv = await (await fetch(`${base}/api/category.csv?name=dating`)).text();
+  assert.ok(catCsv.includes('"by_fans","1","lola"'), catCsv.slice(0, 400));
+  st = await call('/api/categories', { remove: ['nyc dating'] });
+  assert.equal(st.categories.length, 1);
+  console.log('✓ категории: авторы, фаны, любимые авторы фанов, похожая категория');
 } finally {
   app.kill();
   chrome?.removeAllListeners('exit');

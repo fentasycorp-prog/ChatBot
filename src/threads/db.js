@@ -15,7 +15,9 @@ export const SETTING_SPEC = {
   adsProfile: '',
   tgToken: '',                     // Telegram bot token for new-post alerts
   tgChat: '',                      // chat id the alerts go to
-  feedPath: '/following',          // the feed of accounts our profile follows
+  feedPath: '/following',
+  tagPath: '/search?q={q}&serp_type=tags',   // page of a category (topic); {q} is its name
+  catExpand: true,                 // add related categories found along the way          // the feed of accounts our profile follows
   threadsBase: 'https://www.threads.com',
   closeBrowser: true,
   englishOnly: true,
@@ -32,7 +34,15 @@ export const SETTING_SPEC = {
   profilesPerCycle: [2, 0, 20],    // base authors opened directly each cycle, in turn
   followPerRun: [15, 1, 100],      // accounts to follow per button press          // refresh tracked authors every N hours (0 = off)
   maxCandidates: [30, 1, 300],     // candidate profiles evaluated per run
-  minOverlap: [2, 1, 50],          // how many scanned commenters must follow a candidate
+  minOverlap: [2, 1, 50],
+  catAuthors: [100, 1, 1000],      // authors wanted per category
+  catFans: [500, 0, 5000],         // fans (commenters) studied per category
+  maxCategories: [20, 1, 200],
+  catExpandMin: [3, 2, 100],       // authors of a category that must use a tag before it becomes a category
+  catScrolls: [8, 0, 60],
+  runMinutes: [60, 5, 1440],       // a category run stops by itself after this long
+  catBatch: [10, 1, 100],          // authors checked per category per round
+  fanBatch: [20, 1, 200],          // fans read per category per round          // how many scanned commenters must follow a candidate
   minFollowers: [3000, 0, 1e8],
   minPostsPerWeek: [3, 0, 500],
   minAvgReplies: [5, 0, 1e6],
@@ -80,7 +90,9 @@ export function load() {
     audience: raw.audience || {},   // username → { seeds, following, scannedAt }
     lastRun: raw.lastRun || null,
     lastWatchAt: raw.lastWatchAt || null,
-    posts: raw.posts || [],         // our own published posts: { at, text, ok }
+    posts: raw.posts || [],
+    categories: raw.categories || {},   // name → { authors seen in its feed, fans, related tags }
+    fans: raw.fans || {},               // username → whom they comment on, when, under which tags         // our own published posts: { at, text, ok }
   };
   return db;
 }

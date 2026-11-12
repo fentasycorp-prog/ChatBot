@@ -32,7 +32,7 @@ export function tally(db) {
   return map;
 }
 
-function filterReason(acc, s) {
+export function filterReason(acc, s) {
   const m = acc.metrics || {};
   if (acc.private) return 'закрытый профиль';
   if ((acc.followers ?? 0) < s.minFollowers) return `мало подписчиков (${acc.followers ?? '?'})`;
@@ -45,7 +45,7 @@ function filterReason(acc, s) {
 }
 
 // Connect to the AdsPower profile's browser and open a tab of our own.
-async function openSession(s, check) {
+export async function openSession(s, check) {
   const ads = new AdsPower(s.adsUrl, s.adsKey);
   const { ws, started } = await ads.open(s.adsProfile);
   const browser = await chromium.connectOverCDP(ws);

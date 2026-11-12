@@ -39,6 +39,9 @@
   .error { margin-top:14px; padding:11px 14px; border-radius:12px; background:var(--bad-soft); color:var(--bad); font-size:15px; }
   .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; }
   .chip { background:var(--soft); border-radius:999px; padding:4px 6px 4px 12px; font-size:14px; display:inline-flex; align-items:center; gap:2px; }
+  .chip.on { background:var(--text); color:var(--bg); } .chip.on button { color:var(--bg); }
+  .chip span { cursor:pointer; }
+  .rank { width:26px; text-align:right; color:var(--dim); font-size:14px; flex:none; }
   .chip button { border:0; background:none; padding:0 6px; color:var(--dim); font-size:16px; line-height:1; }
 
   .tabs { display:flex; gap:22px; margin:30px 4px 12px; border-bottom:1px solid var(--line); }
@@ -75,16 +78,17 @@
 
   <div class="card">
     <div id="idle">
-      <div class="start"><input id="accounts" placeholder="@аккаунт, который комментирует" autocomplete="off"><button class="primary big" id="start">Старт</button></div>
+      <div class="start"><input id="accounts" placeholder="Категория, например dating" autocomplete="off"><button class="primary big" id="start">Старт</button></div>
     </div>
     <div id="busy" class="running" hidden>
       <span class="dot"></span><div><b id="status"></b><span class="dim small" id="sub"></span></div><button id="stop">Стоп</button>
     </div>
     <div class="error" id="error" hidden></div>
     <div class="chips" id="scouts"></div>
+    <div class="dim small" id="catInfo" style="margin-top:12px"></div>
   </div>
 
-  <div class="tabs"><button data-tab="authors" id="tabAuthors"></button><button data-tab="posts" id="tabPosts"></button></div>
+  <div class="tabs"><button data-tab="top" id="tabTop"></button><button data-tab="fans" id="tabFans"></button><button data-tab="related" id="tabRelated"></button><span style="flex:1"></span><button class="link" id="csv" style="padding:0 0 10px">CSV</button></div>
   <div id="list"></div>
 
   <details class="log"><summary>Журнал</summary><div id="log"></div></details>
@@ -96,7 +100,9 @@
   <label>Telegram: токен бота</label><input id="tgToken" type="password" autocomplete="off">
   <label>Telegram: chat id</label><input id="tgChat">
   <div style="margin-top:12px"><button id="tgTest">Проверить Telegram</button></div>
-  <label class="check" style="margin-top:18px"><input type="checkbox" id="autoFollow"> Подписываться на найденных авторов</label>
+  <div class="two"><div><label>Минут на один запуск</label><input id="runMinutes" type="number" min="5"></div><div><label>Категорий максимум</label><input id="maxCategories" type="number" min="1"></div>
+    <div><label>Авторов на категорию</label><input id="catAuthors" type="number" min="1"></div><div><label>Фанов на категорию</label><input id="catFans" type="number" min="0"></div></div>
+  <label class="check" style="margin-top:18px"><input type="checkbox" id="catExpand"> Добавлять похожие категории самому</label>
   <details><summary>Каких авторов брать</summary>
     <div class="two">
       <div><label>Подписчиков от</label><input id="minFollowers" type="number" min="0"></div>
@@ -124,9 +130,9 @@
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const NUMS = ['minFollowers', 'minAvgLikes', 'minPostsPerWeek', 'minAvgReplies'];
-const CHECKS = ['autoFollow', 'englishOnly'];
-let S = null, tab = 'authors';
+const NUMS = ['minFollowers', 'minAvgLikes', 'minPostsPerWeek', 'minAvgReplies', 'runMinutes', 'maxCategories', 'catAuthors', 'catFans'];
+const CHECKS = ['catExpand', 'englishOnly'];
+let S = null, tab = 'top', current = null;
 
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = 'none'), 5000); }
 async function api(path, data) {
@@ -151,6 +157,7 @@ const avatar = (a) => (a?.avatar ? `<img class="ava" src="/avatar/${encodeURICom
 function statusText(j) {
   const p = j.phase || '';
   const count = j.total ? `${j.done} из ${j.total}` : '';
+  if (/^Категория/.test(p)) return [p.split(': ')[0], [p.split(': ')[1], count].filter(Boolean).join(' — ')];
   if (/^Дежурство/.test(p)) return ['Слежу за новыми постами', p.replace(/^Дежурство:\s*/, '')];
   if (/Комментинг/.test(p)) return ['Смотрю, под кем комментируют', count];
   if (/Кандидаты/.test(p)) return ['Проверяю найденных авторов', count];
@@ -168,26 +175,29 @@ function render() {
   const err = !j.running && j.log.at(-1)?.level === 'error' ? j.log.at(-1).msg : '';
   $('error').hidden = !err; $('error').textContent = err;
 
-  const scouts = S.accounts.filter((a) => a.role === 'scout');
-  $('scouts').innerHTML = scouts.map((a) => `<span class="chip">@${esc(a.username)}${a.dead ? ' · не отвечает' : ''}<button data-unscout="${esc(a.username)}" title="Убрать">×</button></span>`).join('');
-  $('accounts').placeholder = scouts.length ? 'Добавить ещё аккаунт' : '@аккаунт, который комментирует';
-
-  const authors = S.accounts.filter((a) => a.status === 'approved' && a.role !== 'scout').sort((a, b) => (b.metrics?.lastPostAt || 0) - (a.metrics?.lastPostAt || 0));
-  const byName = Object.fromEntries(S.accounts.map((a) => [a.username, a]));
-  $('tabAuthors').textContent = `Авторы${authors.length ? ' · ' + authors.length : ''}`;
-  $('tabPosts').textContent = `Новые посты${S.newPosts.length ? ' · ' + S.newPosts.length : ''}`;
-  $('tabAuthors').className = tab === 'authors' ? 'on' : ''; $('tabPosts').className = tab === 'posts' ? 'on' : '';
-
-  if (tab === 'authors') $('list').innerHTML = authors.length ? authors.map((a) => `<div class="row">${avatar(a)}
-      <div class="mid"><a href="${profileUrl(a.username)}" target="_blank" rel="noopener noreferrer">@${esc(a.username)}</a>
-        <div class="dim small">${fmt(a.followers)} подписчиков${a.metrics?.lastPostAt ? ' · пост ' + ago(a.metrics.lastPostAt) : ''}</div></div>
-      <button class="x" data-remove="${esc(a.username)}" title="Убрать из списка">×</button></div>`).join('')
-    : `<div class="empty">${scouts.length ? 'Нажмите «Старт» — здесь появятся авторы.' : 'Вставьте аккаунт и нажмите «Старт».'}</div>`;
-  else $('list').innerHTML = S.newPosts.length ? S.newPosts.map((p) => `<div class="row">${avatar(byName[p.by] || { username: p.by })}
-      <div class="mid"><a href="${profileUrl(p.by)}/post/${encodeURIComponent(p.code)}" target="_blank" rel="noopener noreferrer">@${esc(p.by)}</a>
-        <span class="dim small"> · ${ago(p.takenAt)}</span>${p.fresh ? '<span class="new">новый</span>' : ''}
-        <div class="small">${esc(p.text) || '<span class="dim">без текста</span>'}</div></div></div>`).join('')
-    : '<div class="empty">Новых постов пока нет.</div>';
+  const cats = S.categories;
+  if (!cats.some((c) => c.name === current)) current = cats[0]?.name || null;
+  const cat = cats.find((c) => c.name === current);
+  $('scouts').innerHTML = cats.map((c) => `<span class="chip${c.name === current ? ' on' : ''}"><span data-cat="${esc(c.name)}">${esc(c.name)}${c.top.length ? ' · ' + c.top.length : ''}</span><button data-uncat="${esc(c.name)}" title="Убрать">×</button></span>`).join('');
+  $('accounts').placeholder = cats.length ? 'Добавить категорию' : 'Категория, например dating';
+  $('catInfo').textContent = !cat ? '' : !cat.scannedAt ? 'Ещё не собрана — нажмите «Старт».'
+    : `Авторов ${cat.top.length} · около ${cat.postsPerDay} постов в день · фанов изучено ${cat.fansScanned} из ${cat.fansTotal}`
+      + (cat.fanHours.length ? ` · фаны активнее всего в ${cat.fanHours.map((h) => String(h).padStart(2, '0') + ':00').join(', ')} UTC` : '');
+  const lists = { top: cat?.top || [], fans: cat?.byFans || [], related: cat?.related || [] };
+  for (const [k, id, title] of [['top', 'tabTop', 'Топ категории'], ['fans', 'tabFans', 'По фанам'], ['related', 'tabRelated', 'Похожие']]) {
+    $(id).textContent = `${title}${lists[k].length ? ' · ' + lists[k].length : ''}`;
+    $(id).className = tab === k ? 'on' : '';
+  }
+  $('csv').hidden = !cat;
+  const person = (r, i) => `<div class="row"><span class="rank">${i + 1}</span>${avatar(r)}
+      <div class="mid"><a href="${profileUrl(r.username)}" target="_blank" rel="noopener noreferrer">@${esc(r.username)}</a>
+        <div class="dim small">${fmt(r.followers)} подписчиков · ${r.postsPerWeek} постов в неделю · ${r.avgReplies} комм. на пост${r.fans ? ` · комментируют ${r.fans} фанов` : ''}</div></div>
+      <button class="x" data-remove="${esc(r.username)}" title="Убрать из базы">×</button></div>`;
+  if (tab === 'related') $('list').innerHTML = lists.related.length ? lists.related.map((r) => `<div class="row"><div class="mid"><b>${esc(r.tag)}</b>
+      <div class="dim small">ставят ${r.authors} авторов этой категории</div></div><button data-addcat="${esc(r.tag)}">Добавить</button></div>`).join('')
+    : '<div class="empty">Похожих категорий пока нет.</div>';
+  else $('list').innerHTML = lists[tab].length ? lists[tab].map(person).join('')
+    : `<div class="empty">${!cat ? 'Введите категорию и нажмите «Старт».' : tab === 'fans' ? 'Появится, когда парсер изучит фанов.' : 'Нажмите «Старт» — здесь появятся авторы.'}</div>`;
 }
 
 function addLog(e) {
@@ -235,18 +245,19 @@ async function saveSettings() {
 
 // ---- actions ----
 async function addAccounts() {
-  const add = $('accounts').value.split(/[\s,]+/).filter(Boolean);
+  const add = $('accounts').value.split(/[,\n]+/).map((x) => x.trim()).filter(Boolean);
   if (!add.length) return;
-  S = await api('/api/seeds', { add, kind: 'scout' });
+  S = await api('/api/categories', { add });
+  current = add.at(-1).toLowerCase().replace(/^#/, '');
   $('accounts').value = '';
   render();
 }
 $('start').onclick = async () => {
   await addAccounts();
-  if (!S.scouts.length) return toast('Вставьте хотя бы один аккаунт');
+  if (!S.categories.length) return toast('Введите хотя бы одну категорию');
   if (!S.settings.adsProfile) { openSettings(); return toast('Выберите профиль AdsPower и нажмите «Старт» ещё раз'); }
   $('log').textContent = '';
-  await api('/api/run', { mode: 'auto' });
+  await api('/api/run', { mode: 'research' });
 };
 $('accounts').onkeydown = (e) => { if (e.key === 'Enter') addAccounts(); };
 $('stop').onclick = () => api('/api/stop', {});
@@ -270,11 +281,15 @@ $('postSend').onclick = async () => {
   toast('Публикую…');
 };
 document.addEventListener('click', async (e) => {
+  const pick = e.target.closest('[data-cat]');
+  if (pick) { current = pick.dataset.cat; return render(); }
   const t = e.target.closest('button');
   if (!t) return;
   if (t.dataset.close !== undefined) return t.closest('dialog').close();
   if (t.dataset.tab) { tab = t.dataset.tab; return render(); }
-  if (t.dataset.unscout) { S = await api('/api/seeds', { kind: 'scout', remove: [t.dataset.unscout] }); return render(); }
+  if (t.dataset.uncat) { if (confirm(`Убрать категорию «${t.dataset.uncat}»?`)) { S = await api('/api/categories', { remove: [t.dataset.uncat] }); render(); } return; }
+  if (t.dataset.addcat) { S = await api('/api/categories', { add: [t.dataset.addcat] }); return render(); }
+  if (t.id === 'csv') { location.href = `/api/category.csv?name=${encodeURIComponent(current)}`; return; }
   if (t.dataset.remove) { S = await api(`/api/account/${encodeURIComponent(t.dataset.remove)}`, { status: 'rejected' }); return render(); }
 });
 
