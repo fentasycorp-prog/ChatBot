@@ -3,7 +3,7 @@
 // the site loads for itself. Element lookups live in SELECTORS so they can be fixed in one place.
 import fs from 'node:fs';
 import path from 'node:path';
-import { harvest, newBag, parseLoose, parseCount, normName } from './extract.js';
+import { harvest, newBag, parseLoose, parseCount, normName, tagName } from './extract.js';
 
 export const SELECTORS = {
   followersLink: /\bfollowers?\b|подписчик/i,       // the "12.3K followers" line in a profile header
@@ -112,7 +112,8 @@ export class Threads {
     await this.goto(`/@${name}/post/${code}`);
     await this.scroll(scrolls, () => this.bag.posts.size);
     return [...this.bag.posts.values()]
-      .filter((p) => p.username !== name && !p.embedded)
+      // Only real replies: the page also carries unrelated suggested posts.
+      .filter((p) => p.username !== name && !p.embedded && (p.isReply || p.replyTo === name) && (!p.replyTo || p.replyTo === name))
       .map((p) => ({ username: p.username, text: p.text, likes: p.likes }));
   }
 
@@ -186,15 +187,23 @@ export class Threads {
     return { authors: [...authors], users: this.bag.users };
   }
 
-  // Posts filed under a category (topic). Falls back to plain search when the topic page gives nothing.
-  async topic(name, { scrolls = 8, tagPath = '/search?q={q}&serp_type=tags' } = {}) {
-    for (const tpl of [tagPath, '/search?q={q}&serp_type=default']) {
-      await this.goto(tpl.replace('{q}', encodeURIComponent(name)));
+  // Posts filed under a category (topic). A topic's own feed opens only with its id, which is learned
+  // from the first search page. Returns { posts, id, exact, tagIds }; exact=false means keyword search only.
+  async topic(name, { scrolls = 8, id = null, tagPath = '/search?q={q}&serp_type=tags' } = {}) {
+    const key = tagName(name);
+    const tagIds = {};
+    const open = async (tid) => {
+      await this.goto(tagPath.replace('{q}', encodeURIComponent(name)) + (tid ? `&tag_id=${encodeURIComponent(tid)}` : ''));
       await this.scroll(scrolls, () => this.bag.posts.size);
-      const posts = [...this.bag.posts.values()].filter((p) => !p.embedded && !p.isReply);
-      if (posts.length) return posts;
-    }
-    return [];
+      Object.assign(tagIds, Object.fromEntries(this.bag.tagIds));
+      return [...this.bag.posts.values()].filter((p) => !p.embedded && !p.isReply);
+    };
+    let posts = await open(id);
+    const tid = id || tagIds[key] || null;
+    if (!id && tid) posts = await open(tid);
+    if (tid) return { posts, id: tid, exact: true, tagIds };
+    const tagged = posts.filter((p) => p.tags.includes(key));
+    return { posts: tagged.length ? tagged : posts, id: null, exact: false, tagIds };
   }
 
   // Posts currently shown in a feed page (for example the Following feed).

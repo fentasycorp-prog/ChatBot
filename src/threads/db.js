@@ -92,7 +92,8 @@ export function load() {
     lastWatchAt: raw.lastWatchAt || null,
     posts: raw.posts || [],
     categories: raw.categories || {},   // name → { authors seen in its feed, fans, related tags }
-    fans: raw.fans || {},               // username → whom they comment on, when, under which tags         // our own published posts: { at, text, ok }
+    fans: raw.fans || {},
+    tagIds: raw.tagIds || {},           // topic name → Threads topic id               // username → whom they comment on, when, under which tags         // our own published posts: { at, text, ok }
   };
   return db;
 }

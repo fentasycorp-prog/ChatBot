@@ -2,7 +2,7 @@
 // JSON the site ships (embedded <script> blobs and GraphQL responses), and turn
 // a list of posts into activity/engagement numbers. No browser code here.
 
-export const newBag = () => ({ users: new Map(), posts: new Map(), parents: new Map(), parentPosts: new Map() });
+export const newBag = () => ({ users: new Map(), posts: new Map(), parents: new Map(), parentPosts: new Map(), tagIds: new Map() });
 
 export const tagName = (s) => String(s || '').trim().toLowerCase().replace(/^#/, '').replace(/\s+/g, ' ').slice(0, 60);
 
@@ -100,6 +100,9 @@ export function harvest(root, bag) {
     if (!node || typeof node !== 'object') continue;
     if (Array.isArray(node)) { for (const v of node) if (v && typeof v === 'object') stack.push([v, embedded]); continue; }
     if (isUser(node)) addUser(bag, node);
+    // A topic has its own id; its feed can only be opened with it.
+    const th = node.tag_header;
+    if (th && typeof th === 'object' && typeof th.display_name === 'string' && th.id != null) bag.tagIds.set(tagName(th.display_name), String(th.id));
     if (isPost(node)) addPost(bag, node, embedded);
     // In a thread each item answers the one before it: remember whose post a reply sits under.
     if (Array.isArray(node.thread_items)) {

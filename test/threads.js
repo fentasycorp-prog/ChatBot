@@ -135,7 +135,10 @@ const site = http.createServer((req, res) => {
   const name = (seg[0] || '').replace(/^@/, '');
   if (!seg[0]) return html(HOME);
   if (seg[0] === 'search') {
-    const list = url.searchParams.get('serp_type') === 'tags' ? TOPIC[url.searchParams.get('q')]?.() || [] : [];
+    // Like the real site: the plain search only hints at the topic (with its id); the topic feed needs tag_id.
+    const q = url.searchParams.get('q');
+    const teaser = TOPIC[q] ? [post('bob', 'TEASER', 1, 1, 0, 'looking around', { tag_header: { display_name: 'Dating', id: '111' } })] : [];
+    const list = url.searchParams.get('serp_type') !== 'tags' ? [] : url.searchParams.get('tag_id') === '111' ? TOPIC[q]() : teaser;
     return html(blob({ searchResults: { edges: list.map((p) => ({ node: { thread_items: [p] } })) } }) + '<h1>search</h1>');
   }
   if (seg[0] === 'following') return html(blob({ feed: { edges: FEED.map((p) => ({ node: { thread_items: [p] } })) } }) + '<h1>following</h1>');
@@ -359,7 +362,7 @@ try {
     assert.equal(cats['nyc dating'].auto, true);
     assert.deepEqual(cats.dating.top.map((r) => r.username).sort(), ['kelly_hot', 'lola', 'megan_big']);
     assert.deepEqual([cats.dating.byFans[0].username, cats.dating.byFans[0].fans, cats.dating.byFans[0].fanComments], ['lola', 3, 4]);
-    assert.deepEqual([cats.dating.fansTotal, cats.dating.fansScanned], [3, 3]);
+    assert.deepEqual([cats.dating.fansTotal, cats.dating.fansScanned], [8, 8], 'фаны: авторы постов категории и комментаторы');
     assert.ok(cats.dating.postsPerDay >= 3 && cats.dating.fanHours.length > 0, JSON.stringify(cats.dating));
     assert.equal(st.accounts.find((a) => a.username === 'lola').status, 'approved', 'прежний статус автора не теряется');
   } catch (e) { console.error(out, JSON.stringify(cats, null, 1).slice(0, 3000)); throw e; }

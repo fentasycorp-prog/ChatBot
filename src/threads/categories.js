@@ -70,7 +70,7 @@ export function summary(db) {
     const pool = new Map([...top, ...byFans].map((r) => [r.username, r]));
     const peak = tally.hours.map((n, h) => [h, n]).filter((x) => x[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 3).map((x) => x[0]);
     return {
-      name: cat.name, auto: cat.auto, scannedAt: cat.scannedAt, seenAuthors: Object.keys(cat.authors).length,
+      name: cat.name, auto: cat.auto, exact: cat.exact !== false, scannedAt: cat.scannedAt, seenAuthors: Object.keys(cat.authors).length,
       top: top.slice(0, 200), byFans: byFans.slice(0, 200),
       postsPerDay: Math.round([...pool.values()].reduce((s, r) => s + r.postsPerWeek, 0) / 7),
       fansTotal: cat.fans.length, fansScanned: tally.scanned, fanHours: peak,
@@ -142,8 +142,13 @@ export async function research({ emit, isStopped }) {
 
     if (!fresh(cat.scannedAt, 1)) {
       phase('читаю ленту');
-      const posts = await step(`категория ${cat.name}`, () => t.topic(cat.name, { scrolls: s.catScrolls, tagPath: s.tagPath }));
-      if (posts) {
+      const res = await step(`категория ${cat.name}`, () => t.topic(cat.name, { scrolls: s.catScrolls, tagPath: s.tagPath, id: cat.tagId || db.tagIds[cat.name] }));
+      if (res) {
+        const posts = res.posts;
+        Object.assign(db.tagIds, res.tagIds);
+        cat.tagId = res.id;
+        cat.exact = res.exact;
+        if (!res.exact) log(`«${cat.name}»: такой темы в Threads не нашлось — взяты посты из поиска по слову. Точные названия тем видны во вкладке «Похожие».`, 'warn');
         const seen = new Set(cat.seen);
         for (const p of posts) {
           const key = p.code || `${p.username}:${p.takenAt}`;
@@ -153,6 +158,13 @@ export async function research({ emit, isStopped }) {
           a.posts++; a.likes += p.likes || 0; a.replies += p.replies || 0;
           cat.authors[p.username] = a;
         }
+        // People posting in a category are its audience too, and so is everyone discussing its hottest posts.
+        const fans = new Set(cat.fans);
+        for (const p of posts) if (fans.size < s.catFans) fans.add(p.username);
+        cat.fans = [...fans];
+        const hot = new Map((cat.hot || []).map((h) => [h.code, h]));
+        for (const p of posts) if (p.code && (p.replies || 0) >= 3) hot.set(p.code, { username: p.username, code: p.code, replies: p.replies });
+        cat.hot = [...hot.values()].sort((a, b) => b.replies - a.replies).slice(0, 40);
         cat.seen = [...seen].slice(-3000);
         cat.scannedAt = new Date().toISOString();
         log(`«${cat.name}»: в ленте ${posts.length} постов, авторов всего ${Object.keys(cat.authors).length}`);
@@ -170,6 +182,19 @@ export async function research({ emit, isStopped }) {
         const acc = await evaluate(u);
         if (acc) { did++; log(`@${u}: ${acc.filterReason ? `отсеян — ${acc.filterReason}` : 'подходит'}`); }
       }
+    }
+
+    if (cat.fans.length < s.catFans) {
+      const fans = new Set(cat.fans);
+      const hot = (cat.hot || []).filter((h) => !cat.harvested[`post:${h.code}`]).slice(0, 4);
+      for (const h of hot) {
+        phase('собираю фанов под обсуждаемыми постами');
+        const reps = await step(`@${h.username}/post/${h.code}`, () => t.replies(h.username, h.code, { scrolls: s.profileScrolls }));
+        did++;
+        for (const r of reps || []) if (fans.size < s.catFans && !(s.englishOnly && isEnglish(r.text) === false)) fans.add(r.username);
+        cat.harvested[`post:${h.code}`] = true;
+      }
+      cat.fans = [...fans];
     }
 
     if (cat.fans.length < s.catFans) {
